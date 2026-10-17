@@ -61,9 +61,7 @@ export const register: Register = on => {
   on('command.run', { command: 'quiet-server' }, async ($, e) => {
     const arg = e.args.trim()
     if (arg === 'status') {
-      const hidden = await update($, isStatusHidden, h => !h)
-      await $.store.set('isStatusHidden', hidden).catch(() => {})
-      await showStatus($)
+      const hidden = await toggleStatus($)
       return { text: hidden ? 'Server count hidden. /quiet-server status shows it again' : 'Server count back in the status line' }
     }
     if (arg === 'demo') {
@@ -92,6 +90,10 @@ export const register: Register = on => {
       { key: 'ask-add', icon: 'add' as const, tip: 'Ask Claude to add a server', label: 'add', press: () => void ask($, 'add') },
       { key: 'ask-find', icon: 'find' as const, tip: 'Ask Claude to look for servers to add', label: 'find', press: () => void ask($, 'find') },
     ]
+    // The switch for the count in the status line, after the asks: a window with its strip along the bottom, filled
+    // while the count shows there.
+    const isCountShown = !(await read($, isStatusHidden))
+    const countSwitch = { key: 'pane-status', tip: isCountShown ? 'Hide the count in the status line' : 'Show the count in the status line', label: isCountShown ? 'hide count' : 'show count', press: () => void toggleStatus($).catch(() => {}) }
     const elsewhereCount = v.elsewhere.length ? String(v.elsewhere.length) : ''
 
     // The surfaces with a vector element draw small text as SVG; the terminal draws the same rows in characters.
@@ -147,7 +149,7 @@ export const register: Register = on => {
         </Box>
       )
       // After "This project": the two asks.
-      const extras = asks.map(a => smallButton({ key: a.key, svg: paneIcon(a.icon), tip: a.tip, press: a.press }))
+      const extras = [...asks.map(a => smallButton({ key: a.key, svg: paneIcon(a.icon), tip: a.tip, press: a.press })), smallButton({ ...countSwitch, svg: statusIcon(isCountShown) })]
       const header = (title: string, detail: string, list: Bulk[], extra: any[] = []) => (
         <Box flexDirection="row" alignItems="center">
           <Box flexShrink={1}>
@@ -231,6 +233,13 @@ export const register: Register = on => {
               </Button>
             </Box>
           ))}
+        {withAsks && (
+          <Box key={`${countSwitch.key}-box`} marginLeft={2}>
+            <Button key={countSwitch.key} plain dimColor onPress={countSwitch.press}>
+              {countSwitch.label}
+            </Button>
+          </Box>
+        )}
       </Box>
     )
     const termRow = (row: Row) => {
@@ -472,12 +481,12 @@ export function sections(s: Snapshot, pending: string[] = []): Sections {
   }
 }
 
-// "servers  ○ 0/0 here  ⋅  ● 1 elsewhere": what runs on this branch against all it runs or could launch, then what
+// "servers  ◦ 0/0 here  ⋅  • 1 elsewhere": what runs on this branch against all it runs or could launch, then what
 // runs elsewhere. The status line is text: a full dot while something runs, an empty one while nothing does.
 export function statusText(s: Snapshot) {
   const { here, elsewhere } = sections(s)
   const running = here.filter(r => r.server).length
-  const mark = (n: number) => (n > 0 ? '●' : '○')
+  const mark = (n: number) => (n > 0 ? '•' : '◦') // the small dots: ● and ○ stand too tall beside the text
   return `servers  ${mark(running)} ${running}/${here.length} here  ⋅  ${mark(elsewhere.length)} ${elsewhere.length} elsewhere`
 }
 
@@ -593,6 +602,14 @@ async function tick($: EngineInterface) {
 }
 
 // The count in the status line, unless /quiet-server status hid it.
+// /quiet-server status and the pane's switch: the choice is kept across sessions.
+async function toggleStatus($: EngineInterface) {
+  const hidden = await update($, isStatusHidden, h => !h)
+  await $.store.set('isStatusHidden', hidden).catch(() => {})
+  await showStatus($)
+  return hidden
+}
+
 async function showStatus($: EngineInterface) {
   const s = await read($, snapshot)
   const text = (await read($, isStatusHidden)) || !s ? undefined : statusText(s)
@@ -1297,4 +1314,11 @@ export function emptySvg(sentences: string[], width: number) {
 export function paneIcon(kind: 'add' | 'find') {
   const d = { add: 'M12 5v14M5 12h14', find: 'M10.5 4a6.5 6.5 0 1 0 0 13a6.5 6.5 0 0 0 0-13zM15.5 15.5L20 20' }[kind]
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${ICON}" height="${ICON}" viewBox="0 0 24 24"><path d="${d}" fill="none" stroke="${TEXT}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+}
+
+// The pane's switch for the count, ICON px: a window with its strip along the bottom, the strip filled while the
+// count shows in the status line.
+export function statusIcon(isShown: boolean) {
+  const strip = isShown ? `<rect x="5" y="14" width="14" height="4" rx="1" fill="${SOFT}"/>` : ''
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${ICON}" height="${ICON}" viewBox="0 0 24 24">${strip}<path d="M4 5h16v14H4zM4 13h16" fill="none" stroke="${TEXT}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
 }

@@ -213,7 +213,7 @@ describe('quiet-server', () => {
     expect(v.here[2]!.meta.map(p => p.text)).toEqual(['npm run storybook'])
     expect(v.other.map(r => [r.name, r.meta[1]!.text])).toEqual([['dev', 'main']]) // another worktree of the same repository
     expect(v.elsewhere.map(r => [r.server!.projectName, r.name, r.description])).toEqual([['blog', 'vite', 'Vite app']]) // elsewhere, by script, under its project
-    expect(statusText(s)).toBe('servers  ● 1/3 here  ⋅  ● 1 elsewhere')
+    expect(statusText(s)).toBe('servers  • 1/3 here  ⋅  • 1 elsewhere')
 
     // A forgotten server's uptime turns orange.
     expect(v.elsewhere[0]!.isForgotten).toBe(true)
@@ -228,7 +228,7 @@ describe('quiet-server', () => {
     expect(sections(s, [`launch:${SHOP}#storybook`]).here.find(r => r.name === 'storybook')?.state).toBe('starting')
 
     // Nothing to run, nothing running: the count still shows, with empty dots.
-    expect(statusText({ ...s, launchables: [], servers: [] })).toBe('servers  ○ 0/0 here  ⋅  ○ 0 elsewhere')
+    expect(statusText({ ...s, launchables: [], servers: [] })).toBe('servers  ◦ 0/0 here  ⋅  ◦ 0 elsewhere')
 
     // A server run straight (`npx next dev`, named after its program) still stands for the script that runs it,
     // and for that one only: `start` stays ready.
@@ -333,7 +333,7 @@ describe('quiet-server', () => {
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: SHOP } as any)
     await settle()
     expect(ran.some(a => a[0] === '/usr/sbin/lsof' && a.includes('-iTCP'))).toBe(true)
-    expect(statuses.at(-1)).toBe('servers  ● 1/3 here  ⋅  ● 1 elsewhere')
+    expect(statuses.at(-1)).toBe('servers  • 1/3 here  ⋅  • 1 elsewhere')
     expect(await $.command.run({ command: 'quiet-server', args: 'status' } as any)).toMatchObject({ text: expect.stringContaining('hidden') })
     expect(statuses.at(-1)).toBeUndefined()
   })
@@ -369,11 +369,17 @@ describe('quiet-server', () => {
     await pane.unmount()
   })
 
-  test('the pane asks Claude for servers', async ($, on) => {
-    const { filled } = engine(on)
+  test('the pane shows or hides the count, and asks Claude for servers', async ($, on) => {
+    const { filled, statuses } = engine(on)
     await $.session.start({ surface: 'desktop', isInteractive: true, cwd: SHOP } as any)
     await settle()
     const pane = await $.ui.mount({ plugin: 'quiet-server', surface: 'desktop', ...PANE } as any)
+    expect(await pane.find({ type: 'Text', text: 'Hide the count in the status line' })).toBeDefined()
+    await pane.press({ key: 'pane-status' })
+    expect(statuses.at(-1)).toBeUndefined()
+    expect(await pane.find({ type: 'Text', text: 'Show the count in the status line' })).toBeDefined()
+    await pane.press({ key: 'pane-status' })
+    expect(statuses.at(-1)).toBe('servers  • 1/3 here  ⋅  • 1 elsewhere')
     await pane.press({ key: 'ask-add' })
     await pane.press({ key: 'ask-find' })
     expect(filled.map(t => t.split(' ').slice(0, 3).join(' '))).toEqual(['Add a dev', 'Look through this']) // the prompt box, for the person to send

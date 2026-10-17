@@ -8,7 +8,7 @@ It stays out of the way: a count in the status line, and the details in a pane w
 
 ## What it shows
 
-**Status line**: `servers  ○ 0/3 here  ⋅  ● 1 elsewhere`, the servers of this branch that run out of all it runs or can launch, then what runs elsewhere. A full dot marks a figure where something runs, an empty dot one where nothing does.
+**Status line**: `servers  ◦ 0/3 here  ⋅  • 1 elsewhere`, the servers of this branch that run out of all it runs or can launch, then what runs elsewhere. A full dot marks a figure where something runs, an empty dot one where nothing does.
 
 **`/quiet-server`** opens or closes a pane in two sections, one under the other.
 
@@ -34,13 +34,14 @@ Everything else is grey. Orange only marks something to look at: a server forgot
 | Stop all | in each section's title line | same | Stops every server of the section; press twice to confirm |
 | Add | plus, on the project's title line | `add` | Puts a request in the prompt box: ask Claude to add a server to `.claude/launch.json` |
 | Find | magnifier, next to it | `find` | Puts a request in the prompt box: ask Claude to look for servers the project could list |
+| Count | a window with its bottom strip, last on the project's title line | `hide count` / `show count` | Shows or hides the count in the status line |
 
 A server launched from the pane lives as long as the Claude session: closing the session stops it. Servers started anywhere else (a terminal, Claude itself) are listed too, and can be stopped from here.
 
 ## Commands
 
 - `/quiet-server`: open or close the pane.
-- `/quiet-server status`: hide or show the count in the status line.
+- `/quiet-server status`: hide or show the count in the status line (the switch at the end of the pane's first line does the same).
 - `/quiet-server demo`: show made-up servers (a project with worktrees, a busy machine) to see the layout; again to come back.
 
 The choice is kept across sessions.
