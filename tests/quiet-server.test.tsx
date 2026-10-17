@@ -1,8 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import {
-  bandSide,
-  bandSvg,
   binaryName,
   demoSnapshot,
   describe as kindOf,
@@ -10,6 +8,9 @@ import {
   elapsed,
   emptySvg,
   fit,
+  folderOf,
+  groups,
+  groupSvg,
   isDevFolder,
   isForeign,
   isServerScript,
@@ -18,6 +19,8 @@ import {
   launchConfigs,
   launcher,
   memory,
+  originOf,
+  originText,
   packageScripts,
   parseCwds,
   parseListeners,
@@ -27,6 +30,7 @@ import {
   rowSvg,
   scriptName,
   sections,
+  selfClaude,
   statusText,
   toGitInfo,
   wrap,
@@ -81,7 +85,6 @@ function engine(on: any) {
     throw new Error(`ENOENT: ${e.path}`)
   })
   on('ui.status', (_$: any, e: any) => (statuses.push(e.text), { value: undefined }))
-  on('ui.render', ($: any, e: any) => $.ui.resolve(e).Text({ children: 'band below' })) // what Claude Code draws under the bar
   on('ui.panes', () => ({ value: [] }))
   on('prompt.fill', (_$: any, e: any) => (filled.push(e.text), { isFilled: true, text: e.text, cursor: e.text.length }))
   on('mcp.call', (_$: any, e: any) => (browsed.push([e.server, e.tool, e.args]), { value: { content: [], isError: false } }))
@@ -102,7 +105,6 @@ function engine(on: any) {
 }
 
 const settle = () => new Promise(done => (globalThis as any).setTimeout(done, 30)) // the first read runs in the background
-const BAND = { component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 120 } }
 const PANE = { component: 'Pane', requestId: 'servers', props: { title: 'Servers', isFocused: false, bodyColumns: 150, placement: 'inline', rows: 30 } }
 
 function snapshotFixture() {
@@ -121,6 +123,7 @@ function snapshotFixture() {
     uptimeMs: procs.get(root)!.elapsedMs,
     rssKb: procs.get(root)!.rssKb,
     cpu: 1,
+    origin: originOf(root, procs),
   })
   return {
     project: { cwd: SHOP, top: SHOP, repo: `${SHOP}/.git`, name: 'shop', branch: 'feat/login' },
@@ -206,11 +209,11 @@ describe('quiet-server', () => {
     const v = sections(s)
     expect(v.here.map(r => [r.name, r.state, r.port])).toEqual([['dev', 'running', 3000], ['api', 'ready', 8000], ['storybook', 'ready', 6006]])
     expect(v.here[0]!.description).toBe('Next.js app')
-    expect(v.here[0]!.meta.map(p => p.text)).toEqual(['12m', '40 MB', '1% CPU']) // this branch: no need to name it
+    expect(v.here[0]!.meta.map(p => p.text)).toEqual(['Terminal', '12m', '40 MB', '1% CPU']) // what started it; this branch: no need to name it
     expect(v.here[2]!.meta.map(p => p.text)).toEqual(['npm run storybook'])
-    expect(v.other.map(r => [r.name, r.meta[0]!.text])).toEqual([['dev', 'main']]) // another worktree of the same repository
-    expect(v.elsewhere.map(r => [r.name, r.description])).toEqual([['blog', 'vite · Vite app']]) // elsewhere, by project
-    expect(statusText(s)).toBe('Servers 1/3')
+    expect(v.other.map(r => [r.name, r.meta[1]!.text])).toEqual([['dev', 'main']]) // another worktree of the same repository
+    expect(v.elsewhere.map(r => [r.server!.projectName, r.name, r.description])).toEqual([['blog', 'vite', 'Vite app']]) // elsewhere, by script, under its project
+    expect(statusText(s)).toBe('servers  ● 1/3 here  ⋅  ● 1 elsewhere')
 
     // A forgotten server's uptime turns orange.
     expect(v.elsewhere[0]!.isForgotten).toBe(true)
@@ -224,8 +227,8 @@ describe('quiet-server', () => {
     expect(sections(s, ['pid:100']).here[0]!.state).toBe('stopping')
     expect(sections(s, [`launch:${SHOP}#storybook`]).here.find(r => r.name === 'storybook')?.state).toBe('starting')
 
-    // Nothing to show: no count.
-    expect(statusText({ ...s, launchables: [], servers: [] })).toBeUndefined()
+    // Nothing to run, nothing running: the count still shows, with empty dots.
+    expect(statusText({ ...s, launchables: [], servers: [] })).toBe('servers  ○ 0/0 here  ⋅  ○ 0 elsewhere')
 
     // A server run straight (`npx next dev`, named after its program) still stands for the script that runs it,
     // and for that one only: `start` stays ready.
@@ -240,15 +243,55 @@ describe('quiet-server', () => {
     const inside = { ...s.servers[2]!, cwd: `${plain}/site`, top: `${plain}/site`, repo: `${plain}/site`, projectName: 'site', branch: '' }
     const noGit = sections({ project: { cwd: plain, top: plain, repo: plain, name: 'plain', branch: '' }, launchables: [], servers: [inside, s.servers[0]!] })
     expect(noGit.here.map(r => r.name)).toEqual(['vite'])
-    expect(noGit.elsewhere.map(r => r.name)).toEqual(['shop'])
+    expect(noGit.elsewhere.map(r => r.server!.projectName)).toEqual(['shop'])
   })
 
   test('the demo shows every kind of row', () => {
     const v = sections(demoSnapshot())
     expect(v.here.map(r => [r.name, r.state])).toEqual([['dev', 'running'], ['storybook', 'ready'], ['preview', 'ready']])
-    expect(v.other.map(r => r.meta[0]!.text)).toEqual(['main'])
-    expect(v.elsewhere.map(r => r.name)).toEqual(['api-billing', 'docs', 'portfolio'])
-    expect(v.elsewhere.find(r => r.name === 'portfolio')?.isForgotten).toBe(true)
+    expect(v.here[0]!.meta[0]!.text).toBe('this pane')
+    expect(v.other.map(r => r.meta.slice(0, 2).map(p => p.text))).toEqual([['iTerm', 'main']])
+    const g = groups(v.elsewhere)
+    expect(g.map(x => [x.name, x.branch, x.folder, x.rows.map(r => r.name)])).toEqual([
+      ['api-billing', 'dev', '~/code', ['uvicorn']],
+      ['docs', 'main', '~/code', ['dev', 'storybook']], // one group, two servers
+      ['portfolio', 'main', '~/code', ['vite']],
+    ])
+    expect(g[0]!.rows[0]!.meta[0]!.text).toBe('Claude, another conversation')
+    expect(g[2]!.rows[0]!.meta.map(p => p.text).slice(0, 2)).toEqual(['detached', '3d'])
+    expect(g[2]!.rows[0]!.isForgotten).toBe(true)
+    expect(groupSvg(g[1]!, 600, true)).toContain('~/code')
+  })
+
+  test('tells what started a server', () => {
+    const CLAUDE_APP = '/Users/me/Library/Application Support/Claude/claude-code/2.1.299/x/claude.app/Contents/MacOS/claude --output-format stream-json'
+    const procs = parsePs([
+      '    1     0 10-00:00:00  1000  0.0 /sbin/launchd',
+      `  700     1 01:00:00  9000  0.0 ${CLAUDE_APP}`,
+      '  701   700    10:00  9000  0.0 npm run dev', // the pane: run by Claude itself, no shell between
+      "  702   700    10:00  9000  0.0 /bin/zsh -c -l source /tmp/snapshot.sh && eval 'npm run dev'", // Claude's Bash tool
+      '  703   702    10:00  9000  0.0 npm run dev',
+      `  800     1 01:00:00  9000  0.0 ${CLAUDE_APP}`,
+      '  801   800    10:00  9000  0.0 python3 -m http.server 8766',
+      '  900     1 01:00:00  9000  0.0 /Applications/iTerm.app/Contents/MacOS/iTerm2',
+      '  901   900 01:00:00  9000  0.0 -zsh',
+      '  902   901    10:00  9000  0.0 node server.js',
+      '  950     1    10:00  9000  0.0 node orphan.js',
+      '  999   700    00:00  1000  0.0 /bin/ps -axo pid=,ppid=,etime=,rss=,%cpu=,command=',
+    ].join('\n'))
+    const self = selfClaude(procs)
+    expect(self).toBe(700) // the Claude above the `ps` the mod ran
+    const label = (root: number, s?: number) => originText(originOf(root, procs, s))
+    expect(label(701, self)).toBe('this pane')
+    expect(label(702, self)).toBe('Claude, this conversation')
+    expect(label(801, self)).toBe('Claude, another conversation')
+    expect(label(801)).toBe('Claude') // which conversation unknown: no guess
+    expect(label(902, self)).toBe('iTerm')
+    expect(label(950, self)).toBe('detached')
+    expect(label(99, undefined)).toBe('') // not in this table
+    expect(originText(originOf(99, parsePs(PS)))).toBe('Terminal') // a login shell, no app named
+    expect(folderOf('/Users/me/Documents/Code/2026 T4/2026 Claude mods/claude-mod-quiet-cost')).toBe('~/…/2026 Claude mods')
+    expect(folderOf('/Users/me/code/blog')).toBe('~/code')
   })
 
   test('"Launch all" starts the dev servers, not the ones that serve a build', () => {
@@ -285,36 +328,14 @@ describe('quiet-server', () => {
     expect(portSvg(v.here[2]!)).not.toContain('<rect')
   })
 
-  test('the bar lists this branch, and its cross moves the count to the status line', async ($, on) => {
+  test('the count stays in the status line', async ($, on) => {
     const { ran, statuses } = engine(on)
     await $.session.start({ surface: 'terminal', isInteractive: true, cwd: SHOP } as any)
     await settle()
     expect(ran.some(a => a[0] === '/usr/sbin/lsof' && a.includes('-iTCP'))).toBe(true)
-    expect(statuses.filter(Boolean)).toEqual([]) // the bar is up: no count twice
-    const band = await $.ui.mount({ plugin: 'quiet-server', surface: 'terminal', ...BAND } as any)
-    expect(await band.find({ type: 'Text', text: 'Servers' })).toBeDefined()
-    expect(await band.find({ type: 'Text', text: 'storybook' })).toBeDefined()
-    expect(await band.find({ type: 'Text', text: '1 other branch · 1 elsewhere' })).toBeDefined()
-    await band.press({ key: 'band-close' })
-    expect(statuses.at(-1)).toBe('Servers 1/3')
-    await band.unmount()
-  })
-
-  test('the desktop bar opens the pane', async ($, on) => {
-    const { opened } = engine(on)
-    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: SHOP } as any)
-    await settle()
-    const band = await $.ui.mount({ plugin: 'quiet-server', surface: 'desktop', ...BAND } as any)
-    expect(await band.find({ type: 'Svg' })).toBeDefined()
-    await band.press({ key: 'band-pane' })
-    await settle()
-    expect(opened).toEqual(['servers'])
-    await band.unmount()
-
-    const v = sections(snapshotFixture())
-    expect(bandSide(v)).toBe('1 other branch · 1 elsewhere')
-    expect(bandSvg(v.here, 600)).toContain('animateTransform') // the running server's wave
-    expect(bandSvg(v.here, 200)).toMatch(/\+\d/) // too narrow for all: "+2"
+    expect(statuses.at(-1)).toBe('servers  ● 1/3 here  ⋅  ● 1 elsewhere')
+    expect(await $.command.run({ command: 'quiet-server', args: 'status' } as any)).toMatchObject({ text: expect.stringContaining('hidden') })
+    expect(statuses.at(-1)).toBeUndefined()
   })
 
   test('the terminal pane: this project first, then what runs elsewhere', async ($, on) => {
@@ -348,17 +369,11 @@ describe('quiet-server', () => {
     await pane.unmount()
   })
 
-  test('the pane shows or hides the bar, and asks Claude for servers', async ($, on) => {
-    const { statuses, filled } = engine(on)
+  test('the pane asks Claude for servers', async ($, on) => {
+    const { filled } = engine(on)
     await $.session.start({ surface: 'desktop', isInteractive: true, cwd: SHOP } as any)
     await settle()
     const pane = await $.ui.mount({ plugin: 'quiet-server', surface: 'desktop', ...PANE } as any)
-    expect(await pane.find({ type: 'Text', text: 'Hide the servers bar' })).toBeDefined()
-    await pane.press({ key: 'pane-bar' })
-    expect(statuses.at(-1)).toBe('Servers 1/3') // the bar is down: the count is in the status line
-    expect(await pane.find({ type: 'Text', text: 'Show the servers bar above the prompt' })).toBeDefined()
-    await pane.press({ key: 'pane-bar' })
-    expect(statuses.at(-1)).toBeUndefined()
     await pane.press({ key: 'ask-add' })
     await pane.press({ key: 'ask-find' })
     expect(filled.map(t => t.split(' ').slice(0, 3).join(' '))).toEqual(['Add a dev', 'Look through this']) // the prompt box, for the person to send

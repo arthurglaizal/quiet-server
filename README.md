@@ -4,22 +4,20 @@
 
 A Claude Code mod in the spirit of [Port Menu](https://github.com/wieandteduard/port-menu), tied to the conversation instead of the menu bar: it knows which project and branch Claude is working in, what that project can launch, and what is already running.
 
-It stays out of the way: a one-line bar above the prompt, and the details in a pane when you ask.
+It stays out of the way: a count in the status line, and the details in a pane when you ask.
 
 ## What it shows
 
-**The bar**, above the prompt: this branch's servers in a line (state, name, port), then what runs on the project's other branches and elsewhere, a button that opens the pane and a cross that closes the bar.
-
-**Status line**, while the bar is closed: `Servers 1/3`, the servers of this branch that run, out of all it runs or can launch.
+**Status line**: `servers  ○ 0/3 here  ⋅  ● 1 elsewhere`, the servers of this branch that run out of all it runs or can launch, then what runs elsewhere. A full dot marks a figure where something runs, an empty dot one where nothing does.
 
 **`/quiet-server`** opens or closes a pane in two sections, one under the other.
 
 - **This project**
   - *The conversation's branch*: its servers that run, then what it can launch: the `package.json` scripts that serve (`dev`, `start`, `serve`, `preview`, `storybook`…) and the entries of `.claude/launch.json`, the file the desktop app's previews already read.
   - *Other branches*: servers started from another worktree of the same repository.
-- **Running elsewhere**: every other dev server on the machine, named after its project.
+- **Running elsewhere**: every other dev server on the machine, grouped by project, each group headed by its branch and the folder it sits in (`claude-mod-quiet-cost  ⑂ main  ~/…/2026 Claude mods`).
 
-Each server takes two lines: its name and what it is (`dev  Next.js app`), then its branch, how long it has been running, memory and CPU. A running server shows a small wave drifting slowly in a ring; one ready to launch, an empty dot. Its port sits on the right, on a slate ground while something listens on it.
+Each server takes two lines: its name and what it is (`dev  Next.js app`), then what started it, how long it has been running, memory and CPU. What started it: `this pane`, `Claude, this conversation`, `Claude, another conversation`, the terminal app (`iTerm`, `Terminal`, `VS Code`…), or `detached` when what launched it is gone. A running server shows a small wave drifting slowly in a ring; one ready to launch, an empty dot. Its port sits on the right, on a slate ground while something listens on it.
 
 Everything else is grey. Orange only marks something to look at: a server forgotten for a day, or a port another server already holds.
 
@@ -41,12 +39,11 @@ A server launched from the pane lives as long as the Claude session: closing the
 
 ## Commands
 
-- `/quiet-server`: open or close the pane (the bar's pane button does the same).
-- `/quiet-server bar`: show or hide the bar (the switch at the end of the pane's first line does the same).
+- `/quiet-server`: open or close the pane.
 - `/quiet-server status`: hide or show the count in the status line.
 - `/quiet-server demo`: show made-up servers (a project with worktrees, a busy machine) to see the layout; again to come back.
 
-Both choices are kept across sessions.
+The choice is kept across sessions.
 
 ## How it finds servers
 

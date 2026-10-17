@@ -14,6 +14,10 @@ export type Launchable = {
   description: string // "Next.js app", from the command
 }
 
+// What started a server, from the processes above it: this pane, Claude in this conversation or another one, a
+// terminal (named when it is a known app), or nothing left, its launcher gone ("detached").
+export type Origin = { kind: 'pane' | 'conversation' | 'claude' | 'terminal' | 'detached' | 'unknown'; app?: string }
+
 // A dev server listening on this machine.
 export type Server = {
   pid: number // the process that listens
@@ -29,6 +33,7 @@ export type Server = {
   uptimeMs: number
   rssKb: number
   cpu: number
+  origin: Origin
 }
 
 // Where this conversation works.
@@ -48,6 +53,6 @@ export type Snapshot = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'quiet-server': { snapshot: Snapshot | null; isStatusHidden: boolean; isBandHidden: boolean; busy: string[]; confirming: Section | null }
+    'quiet-server': { snapshot: Snapshot | null; isStatusHidden: boolean; busy: string[]; confirming: Section | null }
   }
 }

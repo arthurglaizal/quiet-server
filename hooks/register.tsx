@@ -1,14 +1,14 @@
 // Quiet Server: the dev servers of this project, the ones that run and the ones ready to launch, and what runs elsewhere.
-//   Port Menu, tied to the conversation. A bar above the prompt lists this branch's servers, with a button to the
-//   pane and a cross to close it (the status line then keeps the count, "Servers 1/3"). The pane, which /quiet-server
-//   also opens, has two sections, one under the other. This project: what runs on the conversation's branch and what
+//   Port Menu, tied to the conversation. The status line keeps the count: this branch's servers that run out of all
+//   it runs or can launch, and what runs elsewhere. The pane, which /quiet-server opens, has two sections, one under
+//   the other. This project: what runs on the conversation's branch and what
 //   it can launch (package.json scripts, .claude/launch.json), then the same project's servers on its other branches
 //   (its other worktrees). Running elsewhere: every other dev server. Everything stays grey; a wave moves in what runs;
 //   orange marks a server forgotten for a day, or a port another server already holds.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Launchable, Project, Section, Server, Snapshot } from '../types'
+import type { Launchable, Origin, Project, Section, Server, Snapshot } from '../types'
 
 const PANE = 'servers'
 const TICK = 5000 // how often the ports are read again while the bar or the pane shows
@@ -35,7 +35,6 @@ const EMPTY = ['Nothing to run here yet.', 'Scripts named dev, start, serve, pre
 // Held by the host, so the pane survives a hot reload of this file.
 const snapshot = atom({ plugin: 'quiet-server', key: 'snapshot' } as const, null as Snapshot | null)
 const isStatusHidden = atom({ plugin: 'quiet-server', key: 'isStatusHidden' } as const, false)
-const isBandHidden = atom({ plugin: 'quiet-server', key: 'isBandHidden' } as const, false) // the bar's cross pressed
 const busy = atom({ plugin: 'quiet-server', key: 'busy' } as const, [] as string[]) // rows starting or stopping, by key
 const confirming = atom({ plugin: 'quiet-server', key: 'confirming' } as const, null as Section | null) // "Stop all" pressed once, there
 
@@ -46,16 +45,14 @@ const phases = new Map<string, number>() // each running row's place in its wave
 let isRefreshing = false
 let shownStatus: string | undefined
 let ticks = 0
-let isDemo = false // /quiet-server demo: made-up servers in the pane and the bar, to see the layout
+let isDemo = false // /quiet-server demo: made-up servers in the pane and the status line, to see the layout
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const r = await next(e)
-    await $.command.register({ name: 'quiet-server', description: 'Open the servers pane (/quiet-server bar shows or hides the bar, /quiet-server status the count)' }).catch(() => {}) // a name Claude Code already has is refused: start anyway
-    const kept = async (key: string) => (await $.store.get(key).catch(() => undefined)) === true
-    const [statusHidden, bandHidden] = [await kept('isStatusHidden'), await kept('isBandHidden')]
+    await $.command.register({ name: 'quiet-server', description: 'Open the servers pane (/quiet-server status hides or shows the count)' }).catch(() => {}) // a name Claude Code already has is refused: start anyway
+    const statusHidden = (await $.store.get('isStatusHidden').catch(() => undefined)) === true
     await update($, isStatusHidden, () => statusHidden)
-    await update($, isBandHidden, () => bandHidden)
     void refresh($).catch(() => {})
     $.clock.every(TICK, () => void tick($).catch(() => {}))
     return r
@@ -76,106 +73,7 @@ export const register: Register = on => {
       await showStatus($)
       return { text: isDemo ? 'Demo servers shown; /quiet-server demo brings the real ones back' : 'Real servers back' }
     }
-    if (arg === 'bar') {
-      const hidden = await setBandHidden($, !(await read($, isBandHidden)))
-      return { text: hidden ? 'Servers bar hidden. /quiet-server bar shows it again' : 'Servers bar back above the prompt' }
-    }
     return { text: await togglePane($) }
-  })
-
-  // The bar above the prompt: this branch's servers in a line, then the count elsewhere, the pane and the cross.
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const rest = await next(e) // what other mods and Claude Code draw here stays
-    const s = await read($, snapshot)
-    if (e.props.hasSurvey || (await read($, isBandHidden)) || !s) return rest
-    const { Box, Text, Button } = $.ui.resolve(e)
-    const inner = e.props.bodyColumns - 2 // no border: the padding takes 2 cells
-    if (inner < 40) return rest
-    const v = sections(s, await read($, busy))
-    const side = bandSide(v)
-    const togglePress = () => void togglePane($).catch(() => {})
-    const closePress = () => void setBandHidden($, true).catch(() => {})
-    const Svg = (e.surface === 'terminal' ? undefined : ($.ui.resolve(e) as any).Svg) as ((props: { source: string; alt: string; width?: number; height?: number }) => any) | undefined
-    if (Svg) {
-      keepPhases(v, await $.clock.now())
-      const drawn = Math.round((inner - 6) * PX_PER_COLUMN) // the two buttons take the last six cells
-      const sideWidth = side ? Math.ceil(side.length * BAND_CHAR) + 4 : 0
-      const rowWidth = Math.max(160, drawn - sideWidth - BAND_GAP)
-      // As the other mods' bars: a stroked 12 px icon centered in a box of two cells, an empty button over it.
-      const bandButton = (b: { key: string; icon: string; tip: string; press: () => void }) => (
-        <Box key={`${b.key}-box`} width={2} height={1} marginLeft={1} justifyContent="center" alignItems="center">
-          <Svg source={b.icon} alt={b.tip} width={BAND_ICON} height={BAND_ICON} />
-          <Box position="absolute" top={0} left={0} width={2} height={1}>
-            <Button key={b.key} plain onPress={b.press}>
-              {'  '}
-            </Button>
-          </Box>
-          <Box position="absolute" top={1} right={0} width={b.tip.length + 2} justifyContent="flex-end" display="none" hover={{ display: 'flex' }}>
-            <Text color={TIP.name}>{b.tip}</Text>
-          </Box>
-        </Box>
-      )
-      return (
-        <Box flexDirection="column">
-          <Box flexDirection="column" paddingX={1}>
-            <Box flexDirection="row" alignItems="center">
-              <Box flexShrink={1}>
-                <Svg source={bandSvg(v.here, rowWidth, phases)} alt={bandAlt(v.here)} />
-              </Box>
-              <Box flexGrow={1} />
-              {side && <Svg source={bandSideSvg(side, sideWidth)} alt={side} />}
-              {bandButton({ key: 'band-pane', icon: bandIcon('pane'), tip: 'Show or hide the servers pane', press: togglePress })}
-              {bandButton({ key: 'band-close', icon: bandIcon('close'), tip: 'Close (/quiet-server bar brings it back)', press: closePress })}
-            </Box>
-          </Box>
-          {rest}
-        </Box>
-      )
-    }
-    // The terminal: the same line in glyphs, and room left for the terminal's own `[-]` at its end.
-    return (
-      <Box flexDirection="column">
-        <Box flexDirection="column" paddingX={1}>
-          <Box flexDirection="row">
-            <Text dimColor>Servers</Text>
-            <Box marginLeft={2} flexShrink={1}>
-              <Text wrap="truncate-end">
-                {v.here.length === 0 && <Text dimColor>Nothing to run here</Text>}
-                {v.here.map(r => {
-                  const isOn = r.state === 'running' || r.state === 'stopping'
-                  return (
-                    <Text key={`band:${r.key}`}>
-                      <Text dimColor={!isOn}>{`${GLYPH[r.state]} `}</Text>
-                      <Text dimColor={!isOn}>{r.name}</Text>
-                      <Text>{isOn && r.port ? ` :${r.port}` : ''}</Text>
-                      <Text>{'  '}</Text>
-                    </Text>
-                  )
-                })}
-              </Text>
-            </Box>
-            <Box flexGrow={1} />
-            {side && (
-              <Box marginLeft={2} flexShrink={0}>
-                <Text dimColor>{side}</Text>
-              </Box>
-            )}
-            <Box marginLeft={2} flexShrink={0}>
-              <Button key="band-pane" plain dimColor onPress={togglePress}>
-                pane
-              </Button>
-            </Box>
-            <Box marginLeft={2} flexShrink={0}>
-              <Button key="band-close" plain dimColor onPress={closePress}>
-                ×
-              </Button>
-            </Box>
-            <Box width={BAND_CONTROL} flexShrink={0} />
-          </Box>
-        </Box>
-        {rest}
-      </Box>
-    )
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
@@ -189,10 +87,6 @@ export const register: Register = on => {
     const actions = (row: Row) => rowActions($, s, row, surface)
     const copyPort = (row: Row) => () => void copy($, `http://localhost:${row.port}`, surface)
     const branchLine = s.project.branch ? `${s.project.branch} · this conversation` : ''
-    // The pane's own button for the bar, as the bar has one for the pane.
-    const isBandShown = !(await read($, isBandHidden))
-    const barTip = isBandShown ? 'Hide the servers bar' : 'Show the servers bar above the prompt'
-    const barPress = () => void setBandHidden($, isBandShown).catch(() => {})
     // The two that ask Claude: add a server, or look for ones to add. Both fill the prompt; the person sends it.
     const asks = [
       { key: 'ask-add', icon: 'add' as const, tip: 'Ask Claude to add a server', label: 'add', press: () => void ask($, 'add') },
@@ -252,9 +146,8 @@ export const register: Register = on => {
           {tip(b.tip)}
         </Box>
       )
-      // After "This project": the two asks, then the bar's switch (a window and its bar along the bottom, filled
-      // while the bar is up).
-      const extras = [...asks.map(a => smallButton({ key: a.key, svg: paneIcon(a.icon), tip: a.tip, press: a.press })), smallButton({ key: 'pane-bar', svg: barIcon(isBandShown), tip: barTip, press: barPress })]
+      // After "This project": the two asks.
+      const extras = asks.map(a => smallButton({ key: a.key, svg: paneIcon(a.icon), tip: a.tip, press: a.press }))
       const header = (title: string, detail: string, list: Bulk[], extra: any[] = []) => (
         <Box flexDirection="row" alignItems="center">
           <Box flexShrink={1}>
@@ -306,14 +199,19 @@ export const register: Register = on => {
           <Svg source={ruleSvg(drawn)} alt="Divider" />
           {header('Running elsewhere', elsewhereCount, bulk.elsewhere)}
           {v.elsewhere.length === 0 && <Svg source={emptySvg(['Nothing else is running.'], drawn)} alt="Nothing else is running." />}
-          {v.elsewhere.map(rowView)}
+          {groups(v.elsewhere).map((g, i) => (
+            <Box key={g.key} flexDirection="column">
+              <Svg source={groupSvg(g, drawn, i > 0)} alt={[g.name, g.branch, g.folder].filter(Boolean).join(', ')} />
+              {g.rows.map(rowView)}
+            </Box>
+          ))}
           <Box height={2} />
         </Box>,
       )
     }
 
     // The terminal: the same sections, each server on two lines.
-    const termHeader = (title: string, detail: string, list: Bulk[], withBar = false) => (
+    const termHeader = (title: string, detail: string, list: Bulk[], withAsks = false) => (
       <Box flexDirection="row">
         <Text>{title}</Text>
         <Text dimColor wrap="truncate-end">{`  ${detail}`}</Text>
@@ -325,7 +223,7 @@ export const register: Register = on => {
             </Button>
           </Box>
         ))}
-        {withBar &&
+        {withAsks &&
           asks.map(a => (
             <Box key={`${a.key}-box`} marginLeft={2}>
               <Button key={a.key} plain dimColor onPress={a.press}>
@@ -333,13 +231,6 @@ export const register: Register = on => {
               </Button>
             </Box>
           ))}
-        {withBar && (
-          <Box key="pane-bar-box" marginLeft={2}>
-            <Button key="pane-bar" plain dimColor onPress={barPress}>
-              {isBandShown ? 'hide bar' : 'show bar'}
-            </Button>
-          </Box>
-        )}
       </Box>
     )
     const termRow = (row: Row) => {
@@ -412,7 +303,15 @@ export const register: Register = on => {
         </Box>
         {termHeader('Running elsewhere', elsewhereCount, bulk.elsewhere)}
         {v.elsewhere.length === 0 && <Text dimColor>Nothing else is running.</Text>}
-        {v.elsewhere.map(termRow)}
+        {groups(v.elsewhere).map((g, i) => (
+          <Box key={g.key} flexDirection="column" marginTop={i > 0 ? 1 : 0}>
+            <Text wrap="truncate-end">
+              <Text>{g.name}</Text>
+              <Text dimColor>{`${g.branch ? `  ⑂ ${g.branch}` : ''}  ${g.folder}`}</Text>
+            </Text>
+            {g.rows.map(termRow)}
+          </Box>
+        ))}
       </Box>
     )
   })
@@ -471,13 +370,14 @@ function bulkActions($: EngineInterface, v: Sections, asking: Section | null): R
 }
 
 // Made-up servers, as a project with worktrees and a busy machine would show: this branch running one of three,
-// another worktree on main, and three elsewhere, one forgotten for days.
+// launched from the pane, another worktree on main, and four elsewhere in three projects, started from a terminal,
+// another conversation, or left detached and forgotten for days.
 export function demoSnapshot(): Snapshot {
   const home = '/Users/me/code'
   const top = `${home}/atelier-web`
   const repo = `${top}/.git`
   const launchable = (name: string, command: string, port: number): Launchable => ({ id: `${top}#${name}`, name, script: name, command, run: `npm run ${name}`, cwd: top, source: 'package.json', port, description: describe(command) })
-  const server = (pid: number, name: string, command: string, ports: number[], cwd: string, git: { top: string; repo: string; name: string; branch: string } | null, minutes: number, mb: number, cpu: number): Server => ({
+  const server = (pid: number, name: string, command: string, ports: number[], cwd: string, git: { top: string; repo: string; name: string; branch: string } | null, minutes: number, mb: number, cpu: number, origin: Origin): Server => ({
     pid,
     pids: [pid],
     name,
@@ -491,17 +391,19 @@ export function demoSnapshot(): Snapshot {
     uptimeMs: minutes * 60_000,
     rssKb: mb * 1024,
     cpu,
+    origin,
   })
   const mainTree = `${home}/atelier-web-main`
   return {
     project: { cwd: top, top, repo, name: 'atelier-web', branch: 'feat/checkout' },
     launchables: [launchable('dev', 'next dev -p 3001', 3001), launchable('storybook', 'storybook dev -p 6006', 6006), launchable('preview', 'next start -p 4173', 4173)],
     servers: [
-      server(90001, 'dev', 'npm run dev\nnode .bin/next dev -p 3001', [3001], top, { top, repo, name: 'atelier-web', branch: 'feat/checkout' }, 12, 310, 3),
-      server(90002, 'dev', 'npm run dev\nnode .bin/next dev', [3000], mainTree, { top: mainTree, repo, name: 'atelier-web', branch: 'main' }, 130, 280, 1),
-      server(90003, 'vite', 'node .bin/vite', [5173], `${home}/portfolio`, { top: `${home}/portfolio`, repo: `${home}/portfolio/.git`, name: 'portfolio', branch: 'main' }, 3 * 1440 + 90, 190, 0),
-      server(90004, 'uvicorn', 'uvicorn main:app --port 8000', [8000], `${home}/api-billing`, { top: `${home}/api-billing`, repo: `${home}/api-billing/.git`, name: 'api-billing', branch: 'dev' }, 40, 95, 2),
-      server(90005, 'dev', 'npm run dev\nnode .bin/astro dev', [4321], `${home}/docs`, { top: `${home}/docs`, repo: `${home}/docs/.git`, name: 'docs', branch: 'main' }, 65, 120, 0),
+      server(90001, 'dev', 'npm run dev\nnode .bin/next dev -p 3001', [3001], top, { top, repo, name: 'atelier-web', branch: 'feat/checkout' }, 12, 310, 3, { kind: 'pane' }),
+      server(90002, 'dev', 'npm run dev\nnode .bin/next dev', [3000], mainTree, { top: mainTree, repo, name: 'atelier-web', branch: 'main' }, 130, 280, 1, { kind: 'terminal', app: 'iTerm' }),
+      server(90003, 'vite', 'node .bin/vite', [5173], `${home}/portfolio`, { top: `${home}/portfolio`, repo: `${home}/portfolio/.git`, name: 'portfolio', branch: 'main' }, 3 * 1440 + 90, 190, 0, { kind: 'detached' }),
+      server(90004, 'uvicorn', 'uvicorn main:app --port 8000', [8000], `${home}/api-billing`, { top: `${home}/api-billing`, repo: `${home}/api-billing/.git`, name: 'api-billing', branch: 'dev' }, 40, 95, 2, { kind: 'claude', app: 'another conversation' }),
+      server(90005, 'dev', 'npm run dev\nnode .bin/astro dev', [4321], `${home}/docs`, { top: `${home}/docs`, repo: `${home}/docs/.git`, name: 'docs', branch: 'main' }, 65, 120, 0, { kind: 'terminal', app: 'Terminal' }),
+      server(90006, 'storybook', 'npm run storybook\nnode .bin/storybook dev -p 6007', [6007], `${home}/docs`, { top: `${home}/docs`, repo: `${home}/docs/.git`, name: 'docs', branch: 'main' }, 64, 240, 1, { kind: 'terminal', app: 'Terminal' }),
     ],
   }
 }
@@ -570,10 +472,13 @@ export function sections(s: Snapshot, pending: string[] = []): Sections {
   }
 }
 
-// "Servers 1/3": what runs on this branch, against all it runs or could launch. Nothing when there is neither.
+// "servers  ○ 0/0 here  ⋅  ● 1 elsewhere": what runs on this branch against all it runs or could launch, then what
+// runs elsewhere. The status line is text: a full dot while something runs, an empty one while nothing does.
 export function statusText(s: Snapshot) {
-  const { here } = sections(s)
-  return here.length === 0 ? undefined : `Servers ${here.filter(r => r.server).length}/${here.length}`
+  const { here, elsewhere } = sections(s)
+  const running = here.filter(r => r.server).length
+  const mark = (n: number) => (n > 0 ? '●' : '○')
+  return `servers  ${mark(running)} ${running}/${here.length} here  ⋅  ${mark(elsewhere.length)} ${elsewhere.length} elsewhere`
 }
 
 // A launchable is running when a server of its working tree carries its name, its script or its port.
@@ -581,23 +486,24 @@ export function matches(l: Launchable, sv: Server) {
   return sv.name === l.name || (l.script !== undefined && sv.name === l.script) || (l.port !== undefined && sv.ports.includes(l.port))
 }
 
-// Elsewhere, a server goes by its project ("portfolio", then "dev · Vite app"); here, by its script.
+// A server goes by its script ("dev", then "Next.js app"); its second line starts with what started it. Elsewhere,
+// its project and branch head its group, so the line does not repeat the branch.
 function serverRow(sv: Server, section: Row['section'], l: Launchable | undefined, pending: string[]): Row {
   const key = `pid:${sv.pid}`
   const isStopping = pending.includes(key)
   const isForgotten = sv.uptimeMs > FORGOTTEN
-  const isElsewhere = section === 'elsewhere'
+  const origin = originText(sv.origin)
   return {
     key,
     section,
     state: isStopping ? 'stopping' : 'running',
-    name: isElsewhere ? sv.projectName : (l?.name ?? sv.name),
-    description: isElsewhere ? [sv.name, sv.description].filter(Boolean).join(' · ') : sv.description || l?.description || '',
+    name: l?.name ?? sv.name,
+    description: sv.description || l?.description || '',
     branch: sv.branch,
     port: sv.ports[0],
     meta: isStopping
       ? [{ text: 'Stopping…' }]
-      : [...(section === 'here' || !sv.branch ? [] : [{ text: sv.branch }]), { text: duration(sv.uptimeMs), isWarm: isForgotten }, { text: memory(sv.rssKb) }, { text: `${Math.round(sv.cpu)}% CPU` }],
+      : [...(origin ? [{ text: origin }] : []), ...(section !== 'other' || !sv.branch ? [] : [{ text: sv.branch }]), { text: duration(sv.uptimeMs), isWarm: isForgotten }, { text: memory(sv.rssKb) }, { text: `${Math.round(sv.cpu)}% CPU` }],
     isForgotten,
     server: sv,
     launchable: l,
@@ -624,13 +530,25 @@ function readyRow(l: Launchable, project: Project, servers: Server[], pending: s
   }
 }
 
-// The bar's right side: what runs on the project's other branches and elsewhere.
-export function bandSide(v: Sections) {
-  const other = v.other.length
-  return [other ? `${other} other branch${other > 1 ? 'es' : ''}` : '', v.elsewhere.length ? `${v.elsewhere.length} elsewhere` : ''].filter(Boolean).join(' · ')
+// Running elsewhere, by project: one group per working tree, headed by its project, branch and folder, in the
+// order the rows come (by project, then port).
+export type Group = { key: string; name: string; branch: string; folder: string; rows: Row[] }
+export function groups(rows: Row[]): Group[] {
+  const out = new Map<string, Group>()
+  for (const r of rows) {
+    const sv = r.server!
+    const g = out.get(sv.top) ?? { key: `group:${sv.top}`, name: sv.projectName, branch: sv.branch, folder: folderOf(sv.top), rows: [] }
+    g.rows.push(r)
+    out.set(sv.top, g)
+  }
+  return [...out.values()]
 }
 
-const bandAlt = (rows: Row[]) => `Servers: ${rows.map(r => [r.name, r.state, r.port && r.state === 'running' ? `port ${r.port}` : ''].filter(Boolean).join(' ')).join(', ') || 'nothing to run here'}`
+// The folder a project sits in, from the home folder ("~/code"), its middle cut when deep ("~/…/2026 Claude mods").
+export function folderOf(top: string) {
+  const parts = top.replace(/^\/Users\/[^/]+(?=\/|$)/, '~').split('/').slice(0, -1)
+  return parts.length > 3 ? `${parts[0]}/…/${parts.at(-1)}` : parts.join('/') || '/'
+}
 
 const rowAlt = (row: Row) => [row.name, row.description, ...row.meta.map(p => p.text), row.port ? `port ${row.port}` : ''].filter(Boolean).join(', ')
 
@@ -667,17 +585,17 @@ async function refresh($: EngineInterface) {
   }
 }
 
-// A tick reads the machine when something shows it, else one tick in IDLE_TICKS.
+// A tick reads the machine while the pane shows, else one tick in IDLE_TICKS.
 async function tick($: EngineInterface) {
   ticks++
-  const isShown = !(await read($, isBandHidden)) || (await $.ui.panes()).some(p => p.id === PANE && p.isShown)
+  const isShown = (await $.ui.panes()).some(p => p.id === PANE && p.isShown)
   if (isShown || ticks % IDLE_TICKS === 0) await refresh($)
 }
 
-// The count in the status line, while the bar is closed: with the bar up it would say the same thing twice.
+// The count in the status line, unless /quiet-server status hid it.
 async function showStatus($: EngineInterface) {
   const s = await read($, snapshot)
-  const text = (await read($, isStatusHidden)) || !(await read($, isBandHidden)) || !s ? undefined : statusText(s)
+  const text = (await read($, isStatusHidden)) || !s ? undefined : statusText(s)
   if (text === shownStatus) return
   shownStatus = text
   $.ui.status(text)
@@ -749,6 +667,7 @@ async function scanServers($: EngineInterface, home: string, now: number): Promi
   ])
   const cwds = parseCwds(cwdOut.stdout)
   const procs = parsePs(psOut.stdout)
+  const self = selfClaude(procs)
   const byRoot = new Map<number, Server>()
   for (const pid of pids) {
     const cwd = cwds.get(pid)
@@ -777,6 +696,7 @@ async function scanServers($: EngineInterface, home: string, now: number): Promi
       uptimeMs: procs.get(root)!.elapsedMs,
       rssKb: family.reduce((n, p) => n + (procs.get(p)?.rssKb ?? 0), 0),
       cpu: family.reduce((n, p) => n + (procs.get(p)?.cpu ?? 0), 0),
+      origin: originOf(root, procs, self),
     })
   }
   return [...byRoot.values()]
@@ -844,14 +764,6 @@ async function togglePane($: EngineInterface) {
   void refresh($).catch(() => {})
   const opened = await $.ui.open({ id: PANE, title: 'Servers' })
   return opened.isPlaced ? 'Servers pane opened' : `Servers pane waiting: ${opened.reason}`
-}
-
-// The bar's cross and /quiet-server bar: the choice is kept, and the count moves to the status line meanwhile.
-async function setBandHidden($: EngineInterface, hidden: boolean) {
-  await update($, isBandHidden, () => hidden)
-  await $.store.set('isBandHidden', hidden).catch(() => {})
-  await showStatus($)
-  return hidden
 }
 
 // Claude's own browser: a tab at the URL, through the browser the desktop app serves the session.
@@ -992,6 +904,75 @@ function ancestors(pid: number, procs: Map<number, Proc>, root: number) {
     out.unshift(at)
   }
   return out
+}
+
+// What started a server: the nearest of Claude or a terminal app above its launcher. A login shell ("-zsh") with
+// no app found is a terminal too; a launcher whose parent is gone (launchd took it) is detached.
+const CLAUDE = /(^|\/)claude(\s|$)|@anthropic-ai\/claude-code/
+const TERMINALS: [RegExp, string][] = [
+  [/\/Terminal\.app\//, 'Terminal'],
+  [/\/iTerm\d?\.app\/|(^|\/)iTerm2(\s|$)/, 'iTerm'],
+  [/\/Warp\.app\//, 'Warp'],
+  [/\/Ghostty\.app\//i, 'Ghostty'],
+  [/\/kitty\.app\/|(^|\/)kitty(\s|$)/, 'kitty'],
+  [/\/Alacritty\.app\//, 'Alacritty'],
+  [/\/WezTerm\.app\/|(^|\/)wezterm-gui(\s|$)/i, 'WezTerm'],
+  [/\/Visual Studio Code\.app\/|(^|\/)Code Helper/, 'VS Code'],
+  [/\/Cursor\.app\//, 'Cursor'],
+  [/\/Zed\.app\//, 'Zed'],
+  [/(^|\/)tmux(:|\s|$)/, 'tmux'],
+]
+const SHELL = /^(\S*\/)?-?(ba|z|fi|k|da)?sh(\s|$)/
+const PS_SELF = /^\/bin\/ps -axo pid=,ppid=/
+
+// The Claude process this mod runs in: above the `ps` it ran to read the table.
+export function selfClaude(procs: Map<number, Proc>) {
+  const ps = [...procs.values()].find(p => PS_SELF.test(p.command))
+  return ps ? nearest(ps.ppid, procs, p => CLAUDE.test(p.command)) : undefined
+}
+
+function nearest(pid: number, procs: Map<number, Proc>, test: (p: Proc) => boolean) {
+  let at = procs.get(pid)
+  for (let i = 0; at && at.pid > 1 && i < 24; i++, at = procs.get(at.ppid)) if (test(at)) return at.pid
+  return undefined
+}
+
+export function originOf(root: number, procs: Map<number, Proc>, self?: number): Origin {
+  const top = procs.get(root)
+  if (!top) return { kind: 'unknown' }
+  if (top.ppid <= 1) return { kind: 'detached' }
+  let isLogin = false
+  let at = procs.get(top.ppid)
+  for (let i = 0; at && at.pid > 1 && i < 24; i++, at = procs.get(at.ppid)) {
+    if (CLAUDE.test(at.command)) {
+      if (self === undefined) return { kind: 'claude' }
+      if (at.pid !== self) return { kind: 'claude', app: 'another conversation' }
+      // The pane runs the entry itself (exec: no shell left above it); Claude's own commands go through a shell.
+      return at.pid === top.ppid && !SHELL.test(top.command) ? { kind: 'pane' } : { kind: 'conversation' }
+    }
+    const app = TERMINALS.find(([re]) => re.test(at!.command))?.[1]
+    if (app) return { kind: 'terminal', app }
+    if (/^-\S*sh(\s|$)|^login(\s|$)|(^|\/)login -/.test(at.command)) isLogin = true
+  }
+  return isLogin ? { kind: 'terminal' } : { kind: 'unknown' }
+}
+
+// The origin as the row's second line starts.
+export function originText(o: Origin) {
+  switch (o.kind) {
+    case 'pane':
+      return 'this pane'
+    case 'conversation':
+      return 'Claude, this conversation'
+    case 'claude':
+      return o.app ? `Claude, ${o.app}` : 'Claude'
+    case 'terminal':
+      return o.app ?? 'Terminal'
+    case 'detached':
+      return 'detached'
+    default:
+      return ''
+  }
 }
 
 // The script a package manager runs ("npm run dev" → dev), from the launch chain: past the options, and past a
@@ -1170,15 +1151,6 @@ const DARK = '#5d5d62' // the rest of a row that does not run: it steps back, wh
 const DIM = '#5d6370' // a port nothing listens on yet
 const BUTTON_GROUND = '#2a2a2d'
 const RULE = '#3a3a3e'
-// The bar keeps the band scale of the mods' design: 13 px title, 11 px text, a 20 px line, 12 px icons.
-const BAND_TITLE = 13
-const BAND_FONT = 11
-const BAND_CHAR = 6.1 // an estimate of a character's width at BAND_FONT
-const BAND_H = 20
-const BAND_BASE = 14
-const BAND_ICON = 12
-const BAND_GAP = 12
-const BAND_CONTROL = 4 // the terminal's own `[-]` at the end of the band's first row, and a space before it
 const TIP = { name: '#b9b9be', dim: '#7d7d83', card: '#262629', border: '#3d3f45' } // the tooltips: soft grey text; in a pane, on a card of their own
 const EMPTY_GROUND = '#232326' // under an empty state's note
 const FONTS = "-apple-system, 'SF Pro Text', system-ui, sans-serif"
@@ -1289,6 +1261,24 @@ export function captionSvg(caption: string, width: number, withBranch = false) {
   return `${svgOpen(width, CAPTION_H)}${withBranch ? branchGlyph(0, CAPTION_BASE - 10, 12) : ''}<text x="${x}" y="${CAPTION_BASE}" fill="${TEXT}" font-size="${SMALL}" xml:space="preserve">${esc(fit(caption, width - x, SMALL_WIDTH))}</text></svg>`
 }
 
+// A group's head, running elsewhere, in the style of the conversation's branch line: the project in the brighter
+// grey, then its branch with the branch glyph and the folder it sits in, all at the small size, set apart from the
+// group above by a little room.
+export function groupSvg(g: Group, width: number, isSpaced = false) {
+  const top = isSpaced ? 10 : 0
+  const base = top + CAPTION_BASE
+  const name = fit(g.name, width * 0.5, SMALL_WIDTH)
+  const parts = [`<text x="0" y="${base}" font-size="${SMALL}" xml:space="preserve"><tspan fill="${SOFT}">${esc(name)}</tspan><tspan fill="${TEXT}"> · </tspan></text>`]
+  let x = (name.length + 3) * SMALL_WIDTH
+  if (g.branch) {
+    parts.push(branchGlyph(x, base - 10, 12))
+    x += 18
+  }
+  const rest = fit([g.branch, g.folder].filter(Boolean).join(' · '), width - x, SMALL_WIDTH)
+  parts.push(`<text x="${x}" y="${base}" fill="${TEXT}" font-size="${SMALL}" xml:space="preserve">${esc(rest)}</text>`)
+  return `${svgOpen(width, top + CAPTION_H)}${parts.join('')}</svg>`
+}
+
 // The thin line between the two sections, with room under it before the next title.
 export function ruleSvg(width: number) {
   return `${svgOpen(width, 40)}<rect x="0" y="14" width="${width}" height="1" fill="${RULE}"/></svg>`
@@ -1303,48 +1293,8 @@ export function emptySvg(sentences: string[], width: number) {
   return `${svgOpen(width, height + 8)}<rect x="0" y="0" width="${width}" height="${height}" rx="6" fill="${EMPTY_GROUND}"/>${text}</svg>`
 }
 
-// The bar: "Servers", then each of this branch's servers, its state, name and port (a launch, its name alone),
-// as many as the width holds and "+2" for the rest.
-export function bandSvg(rows: Row[], width: number, offsets: Map<string, number> = new Map()) {
-  let x = Math.round('Servers'.length * BAND_CHAR * (BAND_TITLE / BAND_FONT)) + BAND_GAP
-  const parts = [`<text x="0" y="${BAND_BASE}" fill="${TEXT}" font-size="${BAND_TITLE}">Servers</text>`]
-  if (rows.length === 0) parts.push(`<text x="${x}" y="${BAND_BASE}" fill="${TEXT}" font-size="${BAND_FONT}">Nothing to run here</text>`)
-  for (const [i, r] of rows.entries()) {
-    const isOn = r.state === 'running' || r.state === 'stopping'
-    const port = isOn && r.port ? `:${r.port}` : ''
-    const w = BAND_ICON + 5 + r.name.length * BAND_CHAR + (port ? 5 + port.length * BAND_CHAR : 0)
-    const left = rows.length - i
-    if (x + w > width - (left > 1 ? 4 * BAND_CHAR : 0)) {
-      parts.push(`<text x="${x}" y="${BAND_BASE}" fill="${TEXT}" font-size="${BAND_FONT}">+${left}</text>`)
-      break
-    }
-    parts.push(`<g transform="translate(${x} ${(BAND_H - BAND_ICON) / 2}) scale(${BAND_ICON / 16})">${stateGlyph(r.state, offsets.get(r.key), `w${i}`)}</g>`)
-    parts.push(`<text x="${x + BAND_ICON + 5}" y="${BAND_BASE}" font-size="${BAND_FONT}" xml:space="preserve"><tspan fill="${isOn ? SOFT : TEXT}">${esc(r.name)}</tspan>${port ? `<tspan dx="5" fill="${SOFT}">${port}</tspan>` : ''}</text>`)
-    x += w + BAND_GAP
-  }
-  return `${svgOpen(width, BAND_H)}${parts.join('')}</svg>`
-}
-
-// The bar's right side, its figures left-aligned in their own box.
-export function bandSideSvg(side: string, width: number) {
-  return `${svgOpen(width, BAND_H)}<text x="0" y="${BAND_BASE}" fill="${TEXT}" font-size="${BAND_FONT}">${esc(side)}</text></svg>`
-}
-
 // The title line's asks, ICON px, stroked in the text's grey: a plus, and a magnifier.
 export function paneIcon(kind: 'add' | 'find') {
   const d = { add: 'M12 5v14M5 12h14', find: 'M10.5 4a6.5 6.5 0 1 0 0 13a6.5 6.5 0 0 0 0-13zM15.5 15.5L20 20' }[kind]
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${ICON}" height="${ICON}" viewBox="0 0 24 24"><path d="${d}" fill="none" stroke="${TEXT}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
-}
-
-// The pane's switch for the bar, ICON px: a window with its bar along the bottom, the bar filled while it is up.
-export function barIcon(isShown: boolean) {
-  const strip = isShown ? `<rect x="5" y="14" width="14" height="4" rx="1" fill="${SOFT}"/>` : ''
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${ICON}" height="${ICON}" viewBox="0 0 24 24">${strip}<path d="M4 5h16v14H4zM4 13h16" fill="none" stroke="${TEXT}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
-}
-
-// The bar's buttons, 12 px, stroked in the text's grey as the other mods' bars: the pane (a window with its side
-// panel) and the cross.
-export function bandIcon(kind: 'pane' | 'close') {
-  const d = { pane: 'M4 5h16v14H4zM15 5v14', close: 'M6 6l12 12M18 6L6 18' }[kind]
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${BAND_ICON}" height="${BAND_ICON}" viewBox="0 0 24 24"><path d="${d}" fill="none" stroke="${TEXT}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
 }
