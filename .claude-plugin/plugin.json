@@ -1,7 +1,7 @@
 {
   "name": "quiet-server",
   "version": "0.1.0",
-  "description": "Your dev servers, tied to the project and branch you work on: a bar above the prompt lists what runs here, and /quiet-server opens a pane to launch, open or stop them, with every other server on the machine, its memory and the forgotten ones, below.",
+  "description": "Your dev servers, tied to the project and branch you work on: the status line counts what runs here and elsewhere, and /quiet-server opens a pane to launch, open or stop them, with every other server on the machine grouped by project, what started it, its memory and the forgotten ones.",
   "author": {
     "name": "Arthur Glaizal",
     "url": "https://github.com/arthurglaizal"
