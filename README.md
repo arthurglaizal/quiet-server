@@ -8,7 +8,7 @@ It stays out of the way: a count in the status line, and the details in a pane w
 
 ## What it shows
 
-**Status line**: `servers  ◦ 0/3 here  ⋅  • 1 elsewhere`, the servers of this branch that run out of all it runs or can launch, then what runs elsewhere. A full dot marks a figure where something runs, an empty dot one where nothing does.
+**Status line**: `quiet-server  0/3 here  1 elsewhere`, the servers of this branch that run out of all it runs or can launch, then what runs elsewhere. On the desktop, a `◫` button beside it opens or closes the pane.
 
 **`/quiet-server`** opens or closes a pane in two sections, one under the other.
 
@@ -34,7 +34,7 @@ Everything else is grey. Orange only marks something to look at: a server forgot
 | Stop all | in each section's title line | same | Stops every server of the section; press twice to confirm |
 | Add | plus, on the project's title line | `add` | Puts a request in the prompt box: ask Claude to add a server to `.claude/launch.json` |
 | Find | magnifier, next to it | `find` | Puts a request in the prompt box: ask Claude to look for servers the project could list |
-| Count | a window with its bottom strip, last on the project's title line | `hide count` / `show count` | Shows or hides the count in the status line |
+| Count | a window with its bottom strip, last on the project's title line | `hide count` / `show count` | Shows or hides the count in the status line, and the pane's button beside it |
 
 A server launched from the pane lives as long as the Claude session: closing the session stops it. Servers started anywhere else (a terminal, Claude itself) are listed too, and can be stopped from here.
 

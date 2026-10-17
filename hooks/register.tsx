@@ -24,6 +24,7 @@ const IGNORED = /^(claude|codex)$/i // assistants listening for their own reason
 // binary among them), and assistants. Python.app is no app: it is how macOS's own python3 runs, from Xcode's folder.
 const FOREIGN = /(?<!Python)\.app\/Contents\/MacOS\/|(^|\/)(claude|codex)(\s|$)|@anthropic-ai\/claude-code|@openai\/codex/
 const GLYPH = { running: '◉', ready: '○', starting: '◌', stopping: '◉', preview: '⊞', open: '↗', stop: '■', start: '▶' } as const
+const TOGGLE_GLYPH = '◫' // the footer's button: a window with its side panel, the pane it opens
 const BROWSER = 'Claude_Browser' // the desktop app's own browser, served to the session as an MCP server
 // What the two "ask Claude" buttons put in the prompt box, for the person to complete or send.
 const ASK = {
@@ -74,6 +75,23 @@ export const register: Register = on => {
     return { text: await togglePane($) }
   })
 
+  // In the prompt's footer, beside the mode labels: a button that opens or closes the pane (the status line, being
+  // text, cannot be pressed). The desktop draws its native button there and no drawing inside it: the button holds
+  // one glyph, a window with its side panel. The desktop only: the terminal has /quiet-server.
+  on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
+    const rest = await next(e)
+    if (e.surface === 'terminal' || (await read($, isStatusHidden))) return rest // the pane's switch hides it with the count
+    const { Box, Button } = $.ui.resolve(e)
+    return (
+      <Box flexDirection="row" alignItems="center">
+        <Button key="pane-toggle" plain dimColor onPress={() => void togglePane($).catch(() => {})}>
+          {TOGGLE_GLYPH}
+        </Button>
+        {rest && <Box marginLeft={2}>{rest}</Box>}
+      </Box>
+    )
+  })
+
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button } = $.ui.resolve(e)
     const s = await read($, snapshot)
@@ -93,7 +111,7 @@ export const register: Register = on => {
     // The switch for the count in the status line, after the asks: a window with its strip along the bottom, filled
     // while the count shows there.
     const isCountShown = !(await read($, isStatusHidden))
-    const countSwitch = { key: 'pane-status', tip: isCountShown ? 'Hide the count in the status line' : 'Show the count in the status line', label: isCountShown ? 'hide count' : 'show count', press: () => void toggleStatus($).catch(() => {}) }
+    const countSwitch = { key: 'pane-status', tip: isCountShown ? 'Hide the count and button under the prompt' : 'Show the count and button under the prompt', label: isCountShown ? 'hide count' : 'show count', press: () => void toggleStatus($).catch(() => {}) }
     const elsewhereCount = v.elsewhere.length ? String(v.elsewhere.length) : ''
 
     // The surfaces with a vector element draw small text as SVG; the terminal draws the same rows in characters.
@@ -481,13 +499,11 @@ export function sections(s: Snapshot, pending: string[] = []): Sections {
   }
 }
 
-// "servers  ◦ 0/0 here  ⋅  • 1 elsewhere": what runs on this branch against all it runs or could launch, then what
-// runs elsewhere. The status line is text: a full dot while something runs, an empty one while nothing does.
+// The count, one line of text in the status line: "0/0 here", what runs on this branch against all it runs or could
+// launch, then "1 elsewhere", a wide space between the two. The app already writes "quiet-server" before it.
 export function statusText(s: Snapshot) {
   const { here, elsewhere } = sections(s)
-  const running = here.filter(r => r.server).length
-  const mark = (n: number) => (n > 0 ? '•' : '◦') // the small dots: ● and ○ stand too tall beside the text
-  return `servers  ${mark(running)} ${running}/${here.length} here  ⋅  ${mark(elsewhere.length)} ${elsewhere.length} elsewhere`
+  return `${here.filter(r => r.server).length}/${here.length} here\u2003${elsewhere.length} elsewhere`
 }
 
 // A launchable is running when a server of its working tree carries its name, its script or its port.
