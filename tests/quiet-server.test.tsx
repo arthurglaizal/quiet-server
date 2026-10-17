@@ -312,7 +312,8 @@ describe('quiet-server', () => {
     expect(fit('feat/very-long-branch-name', 60)).toBe('feat/ve…')
     expect(fit('main', 60)).toBe('main')
     expect(wrap('one two three four', 70)).toEqual(['one two', 'three four'])
-    expect(emptySvg(['Nothing to run here yet.'], 400)).toContain('<rect') // the empty state's ground
+    expect(emptySvg(['Nothing to run here yet.'], 400, '<path d="M8 52h64"/>')).toContain('<rect') // the empty state's ground
+    expect(emptySvg(['Nothing to run here yet.'], 400, '<path d="M8 52h64"/>')).toContain('<path d="M8 52h64"/>') // and its drawing
 
     const v = sections(snapshotFixture())
     const row = { ...v.here[0]!, description: 'a <b> & c' }

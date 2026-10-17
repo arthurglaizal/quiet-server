@@ -211,14 +211,14 @@ export const register: Register = on => {
         <Box flexDirection="column" paddingX={1}>
           {header('This project', s.project.name, bulk.project, extras)}
           {branchLine && <Svg source={branchSvg(s.project.branch, drawn)} alt={branchLine} />}
-          {v.here.length === 0 && <Svg source={emptySvg(EMPTY, drawn)} alt={EMPTY.join(' ')} />}
+          {v.here.length === 0 && <Svg source={emptySvg(EMPTY, drawn, POTTED_CACTUS)} alt={EMPTY.join(' ')} />}
           {v.here.map(rowView)}
           {v.other.length > 0 && <Box height={1} />}
           {v.other.length > 0 && <Svg source={captionSvg('Other branches', drawn, true)} alt="Other branches" />}
           {v.other.map(rowView)}
           <Svg source={ruleSvg(drawn)} alt="Divider" />
           {header('Running elsewhere', elsewhereCount, bulk.elsewhere)}
-          {v.elsewhere.length === 0 && <Svg source={emptySvg(['Nothing else is running.'], drawn)} alt="Nothing else is running." />}
+          {v.elsewhere.length === 0 && <Svg source={emptySvg(['Nothing else is running.'], drawn, NIGHT)} alt="Nothing else is running." />}
           {groups(v.elsewhere).map((g, i) => (
             <Box key={g.key} flexDirection="column">
               <Svg source={groupSvg(g, drawn, i > 0)} alt={[g.name, g.branch, g.folder].filter(Boolean).join(', ')} />
@@ -1317,14 +1317,37 @@ export function ruleSvg(width: number) {
   return `${svgOpen(width, 40)}<rect x="0" y="14" width="${width}" height="1" fill="${RULE}"/></svg>`
 }
 
-// An empty state: its sentences close together on a faint grey ground, so they read as one note.
-export function emptySvg(sentences: string[], width: number) {
+// An empty state: a small drawing, then its sentences close together beside it, on a faint grey ground, so they
+// read as one note.
+export function emptySvg(sentences: string[], width: number, art: string) {
   const pad = 12
-  const lines = sentences.flatMap(t => wrap(t, width - 2 * pad, SMALL_WIDTH))
-  const height = 2 * pad + lines.length * 18 - 4
-  const text = lines.map((line, i) => `<text x="${pad}" y="${pad + 12 + i * 18}" fill="${TEXT}" font-size="${SMALL}" xml:space="preserve">${esc(line)}</text>`).join('')
-  return `${svgOpen(width, height + 8)}<rect x="0" y="0" width="${width}" height="${height}" rx="6" fill="${EMPTY_GROUND}"/>${text}</svg>`
+  const box = { w: 64, h: 51 } // the drawing, drawn at 4/5 of its 80 × 64 grid
+  const x = pad + box.w + 14
+  const lines = sentences.flatMap(t => wrap(t, width - x - pad, SMALL_WIDTH))
+  const textHeight = lines.length * 18 - 4
+  const height = Math.max(box.h, textHeight) + 2 * pad
+  const top = (height - textHeight) / 2
+  const text = lines.map((line, i) => `<text x="${x}" y="${top + 12 + i * 18}" fill="${TEXT}" font-size="${SMALL}" xml:space="preserve">${esc(line)}</text>`).join('')
+  const drawing = `<g transform="translate(${pad} ${(height - box.h) / 2}) scale(0.8)" fill="none" stroke="${OFF}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${art}</g>`
+  return `${svgOpen(width, height + 8)}<rect x="0" y="0" width="${width}" height="${height}" rx="6" fill="${EMPTY_GROUND}"/>${drawing}${text}</svg>`
 }
+
+// The empty states' drawings, on an 80 × 64 grid. This project: a small, squat cactus in a wide pot, nothing
+// planted yet, drawn 1.2 times its size from the pot's foot, its stroke thinned to match the night scene's.
+const POTTED_CACTUS = [
+  '<g transform="translate(41 57) scale(1.2) translate(-41 -54)" stroke-width="1.33">',
+  `<path d="M28 44h26l-2 10H30z" fill="${OFF}" fill-opacity="0.12"/>`,
+  '<path d="M38 44V30a3 3 0 0 1 6 0v14M38 38h-3a2.5 2.5 0 0 1-2.5-2.5V32M44 36h3a2.5 2.5 0 0 0 2.5-2.5V30"/>',
+  '</g>',
+].join('')
+
+// Running elsewhere: two cacti, a tall one and a small one, under a moon and two stars, a desert at night.
+const NIGHT = [
+  '<path d="M8 52h64"/>',
+  '<path d="M64 10a6 6 0 1 0 4 9 5 5 0 0 1-4-9z"/><path d="M48 12v3M46.5 13.5h3M14 14v2M13 15h2"/>',
+  `<path d="M26 52V20a3.5 3.5 0 0 1 7 0v32M26 38h-4a3 3 0 0 1-3-3v-6M33 33h4a3 3 0 0 0 3-3v-5" fill="${OFF}" fill-opacity="0.12"/>`,
+  '<path d="M50 52V36a2.5 2.5 0 0 1 5 0v16M55 44h3a2 2 0 0 0 2-2v-3"/>',
+].join('')
 
 // The title line's asks, ICON px, stroked in the text's grey: a plus, and a magnifier.
 export function paneIcon(kind: 'add' | 'find') {
