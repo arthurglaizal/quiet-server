@@ -379,6 +379,7 @@ describe('quiet-server', () => {
     const pane = await $.ui.mount({ plugin: 'quiet-server', surface: 'desktop', ...PANE } as any)
     expect(await pane.find({ type: 'Svg' })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: 'Open in browser' })).toBeDefined() // a button's tooltip
+    expect(await pane.find({ type: 'Text', text: 'Launch and open in Claude' })).toBeDefined() // a server ready to launch opens in Claude too
     await pane.press({ key: 'pid:100:preview' })
     expect(browsed).toEqual([['Claude_Browser', 'preview_start', { url: 'http://localhost:3000' }]]) // Claude's own browser
     await pane.press({ key: 'pid:100:open' })

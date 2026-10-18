@@ -8,7 +8,7 @@ It stays out of the way: a count in the status line, and the details in a pane w
 
 ## What it shows
 
-**Status line**: `quiet-server  0/3 here  1 elsewhere`, the servers of this branch that run out of all it runs or can launch, then what runs elsewhere. On the desktop, a `◫` button beside it opens or closes the pane.
+**Status line**: `quiet-server  0/3 here  1 elsewhere`, the servers of this branch that run out of all it runs or can launch, then what runs elsewhere. On the desktop, an eye button beside it opens or closes the pane.
 
 **`/quiet-server`** opens or closes a pane in two sections, one under the other.
 
@@ -26,7 +26,7 @@ Everything else is grey. Orange only marks something to look at: a server forgot
 | Button | Desktop | Terminal | What it does |
 | --- | --- | --- | --- |
 | Launch | filled play | `▶` | Runs the script through your login shell, so it finds `node` and `npm` as your terminal does |
-| Open in Claude | window | (desktop only) | Opens `http://localhost:<port>` in a tab of Claude's own browser |
+| Open in Claude | window | (desktop only) | Opens `http://localhost:<port>` in a tab of Claude's own browser; on a server ready to launch, launches it first and opens it once it listens |
 | Open in browser | arrow | `↗` | Opens it in your default browser |
 | Stop | filled square | `■` | Stops the server and everything it started (`npm run dev` and its children), forcing it after 3 s |
 | Port | `:3000` | `:3000` | Copies the URL |

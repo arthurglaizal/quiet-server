@@ -24,7 +24,7 @@ const IGNORED = /^(claude|codex)$/i // assistants listening for their own reason
 // binary among them), and assistants. Python.app is no app: it is how macOS's own python3 runs, from Xcode's folder.
 const FOREIGN = /(?<!Python)\.app\/Contents\/MacOS\/|(^|\/)(claude|codex)(\s|$)|@anthropic-ai\/claude-code|@openai\/codex/
 const GLYPH = { running: '◉', ready: '○', starting: '◌', stopping: '◉', preview: '⊞', open: '↗', stop: '■', start: '▶' } as const
-const TOGGLE_GLYPH = '◫' // the footer's button: a window with its side panel, the pane it opens
+const TOGGLE_GLYPH = '👁\uFE0E' // the footer's button: an eye, in its text form, on the pane
 const BROWSER = 'Claude_Browser' // the desktop app's own browser, served to the session as an MCP server
 // What the two "ask Claude" buttons put in the prompt box, for the person to complete or send.
 const ASK = {
@@ -133,7 +133,7 @@ export const register: Register = on => {
           <Svg source={b.svg} alt={b.tip} width={BTN_W} height={BTN_H} />
           <Box position="absolute" top={0} left={0} width={BUTTON_BOX} height={1}>
             <Button key={b.key} plain onPress={b.press}>
-              {'\u00A0'.repeat(BUTTON_BOX)}
+              {PRESS.repeat(BUTTON_BOX)}
             </Button>
           </Box>
           {tip(b.tip)}
@@ -147,7 +147,7 @@ export const register: Register = on => {
             <Svg source={wordSvg(b.label, width * PX_PER_COLUMN, b.glyph, b.isWarm)} alt={b.label} />
             <Box position="absolute" top={0} left={0} width={width} height={1}>
               <Button key={b.key} plain onPress={b.press}>
-                {'\u00A0'.repeat(width)}
+                {PRESS.repeat(width)}
               </Button>
             </Box>
             {tip(b.tip)}
@@ -160,7 +160,7 @@ export const register: Register = on => {
           <Svg source={b.svg} alt={b.tip} width={ICON} height={ICON} />
           <Box position="absolute" top={0} left={0} width={2} height={1}>
             <Button key={b.key} plain onPress={b.press}>
-              {'\u00A0\u00A0'}
+              {PRESS.repeat(2)}
             </Button>
           </Box>
           {tip(b.tip)}
@@ -195,7 +195,7 @@ export const register: Register = on => {
               {live && (
                 <Box position="absolute" top={0} right={0} width={TAG_CELLS} height={1}>
                   <Button key={`${row.key}:copy`} plain onPress={copyPort(row)}>
-                    {'\u00A0'.repeat(TAG_CELLS)}
+                    {PRESS.repeat(TAG_CELLS)}
                   </Button>
                 </Box>
               )}
@@ -369,7 +369,12 @@ const demoPress = ($: EngineInterface) => () => void $.ui.toast('Demo servers: n
 
 function realActions($: EngineInterface, s: Snapshot, row: Row, surface: string): Action[] {
   if (row.state === 'starting' || row.state === 'stopping') return []
-  if (row.state === 'ready') return row.launchable ? [{ kind: 'start', tip: 'Launch', press: () => void start($, row.launchable!) }] : []
+  if (row.state === 'ready') {
+    if (!row.launchable) return []
+    const l = row.launchable
+    // Claude's browser launches it first, then opens it once its port listens.
+    return [...(surface === 'desktop' ? [{ kind: 'preview' as const, tip: 'Launch and open in Claude', press: () => void launchAndPreview($, l) }] : []), { kind: 'start', tip: 'Launch', press: () => void start($, l) }]
+  }
   const url = row.port ? `http://localhost:${row.port}` : undefined
   const out: Action[] = []
   if (url && surface === 'desktop') out.push({ kind: 'preview', tip: 'Open in Claude', press: () => void preview($, url) })
@@ -808,6 +813,22 @@ async function preview($: EngineInterface, url: string) {
   void $.ui.toast(`Could not open it in Claude's browser${said ? `: ${said.slice(0, 140)}` : ''}`)
 }
 
+// Launches a server, then opens it in Claude's browser once it listens: its port, as the next reads find it, for
+// up to 30 s.
+async function launchAndPreview($: EngineInterface, l: Launchable) {
+  await start($, l)
+  const deadline = (await $.clock.now()) + 30_000
+  const check = async () => {
+    const s = await read($, snapshot)
+    const row = s ? sections(s).here.find(r => r.launchable?.id === l.id && r.server && r.port !== undefined) : undefined
+    if (row) return void (await preview($, `http://localhost:${row.port}`))
+    if ((await $.clock.now()) > deadline) return void $.ui.toast(`${l.name} is not listening yet: open it once its port shows`)
+    await refresh($)
+    $.clock.after(1500, () => void check().catch(() => {}))
+  }
+  $.clock.after(1500, () => void check().catch(() => {}))
+}
+
 async function open($: EngineInterface, url: string) {
   const done = await run($, [BIN.open, url])
   if (done.exitCode !== 0) void $.ui.toast(`Could not open ${url}: ${done.stderr.trim().slice(0, 140) || `exit ${done.exitCode}`}`)
@@ -1174,6 +1195,9 @@ const TAG_CELLS = 8 // ":65535" at most, right-aligned
 const BTN_W = 24
 const BTN_H = 22
 const BUTTON_BOX = 3 // a button's cells
+// What fills an empty button laid over a drawing: a figure space, as wide as a digit, so the press area and its
+// hover take about the cells the drawing does (a no-break space is a third of that).
+const PRESS = '\u2007'
 const BUTTON_CELLS = 3 * BUTTON_BOX + 3 // three buttons, each a cell from the last
 const TEXT = '#8b8b90'
 const SOFT = '#c4c4c9'
