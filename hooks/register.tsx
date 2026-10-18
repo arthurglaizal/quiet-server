@@ -24,14 +24,14 @@ const IGNORED = /^(claude|codex)$/i // assistants listening for their own reason
 // binary among them), and assistants. Python.app is no app: it is how macOS's own python3 runs, from Xcode's folder.
 const FOREIGN = /(?<!Python)\.app\/Contents\/MacOS\/|(^|\/)(claude|codex)(\s|$)|@anthropic-ai\/claude-code|@openai\/codex/
 const GLYPH = { running: '◉', ready: '○', starting: '◌', stopping: '◉', preview: '⊞', open: '↗', stop: '■', start: '▶' } as const
-const TOGGLE_GLYPH = '👁\uFE0E' // the footer's button: an eye, in its text form, on the pane
+const TOGGLE_GLYPH = '⊙' // the footer's button: an eye seen from the front (the eye character is drawn as a color emoji)
 const BROWSER = 'Claude_Browser' // the desktop app's own browser, served to the session as an MCP server
 // What the two "ask Claude" buttons put in the prompt box, for the person to complete or send.
 const ASK = {
   add: 'Add a dev server to this project\'s .claude/launch.json (name, runtimeExecutable, runtimeArgs, port): ',
   find: 'Look through this project (package.json scripts, docker-compose, Makefile, READMEs, subfolders) for dev servers that .claude/launch.json does not list yet, and add the useful ones to it.',
 } as const
-const EMPTY = ['Nothing to run here yet.', 'Scripts named dev, start, serve, preview or storybook in package.json, and the entries of .claude/launch.json, show up here.']
+const EMPTY = ['Nothing to run here yet.', 'Dev scripts from package.json and .claude/launch.json show up here.']
 
 // Held by the host, so the pane survives a hot reload of this file.
 const snapshot = atom({ plugin: 'quiet-server', key: 'snapshot' } as const, null as Snapshot | null)
@@ -131,7 +131,7 @@ export const register: Register = on => {
       const iconButton = (b: { key: string; svg: string; tip: string; press: () => void }) => (
         <Box key={`${b.key}-box`} width={BUTTON_BOX} height={1} marginLeft={1} justifyContent="center" alignItems="center">
           <Svg source={b.svg} alt={b.tip} width={BTN_W} height={BTN_H} />
-          <Box position="absolute" top={0} left={0} width={BUTTON_BOX} height={1}>
+          <Box position="absolute" top={0} left={0} width={BUTTON_BOX + 1} height={1}>
             <Button key={b.key} plain onPress={b.press}>
               {PRESS.repeat(BUTTON_BOX)}
             </Button>
@@ -145,7 +145,7 @@ export const register: Register = on => {
         return (
           <Box key={`${b.key}-box`} width={width} height={1} marginLeft={2}>
             <Svg source={wordSvg(b.label, width * PX_PER_COLUMN, b.glyph, b.isWarm)} alt={b.label} />
-            <Box position="absolute" top={0} left={0} width={width} height={1}>
+            <Box position="absolute" top={0} left={0} width={width + 1} height={1}>
               <Button key={b.key} plain onPress={b.press}>
                 {PRESS.repeat(width)}
               </Button>
@@ -158,7 +158,7 @@ export const register: Register = on => {
       const smallButton = (b: { key: string; svg: string; tip: string; press: () => void }) => (
         <Box key={`${b.key}-box`} width={2} height={1} marginLeft={2} justifyContent="center" alignItems="center">
           <Svg source={b.svg} alt={b.tip} width={ICON} height={ICON} />
-          <Box position="absolute" top={0} left={0} width={2} height={1}>
+          <Box position="absolute" top={0} left={0} width={3} height={1}>
             <Button key={b.key} plain onPress={b.press}>
               {PRESS.repeat(2)}
             </Button>
@@ -193,7 +193,7 @@ export const register: Register = on => {
             <Box key={`${row.key}:port-box`} width={TAG_CELLS} height={1} flexDirection="row" justifyContent="flex-end" alignItems="center">
               {row.port !== undefined && <Svg source={portSvg(row)} alt={`port ${row.port}`} />}
               {live && (
-                <Box position="absolute" top={0} right={0} width={TAG_CELLS} height={1}>
+                <Box position="absolute" top={0} right={0} width={TAG_CELLS + 1} height={1}>
                   <Button key={`${row.key}:copy`} plain onPress={copyPort(row)}>
                     {PRESS.repeat(TAG_CELLS)}
                   </Button>
@@ -1196,7 +1196,8 @@ const BTN_W = 24
 const BTN_H = 22
 const BUTTON_BOX = 3 // a button's cells
 // What fills an empty button laid over a drawing: a figure space, as wide as a digit, so the press area and its
-// hover take about the cells the drawing does (a no-break space is a third of that).
+// hover take about the cells the drawing does (a no-break space is a third of that). Their box is a cell wider than
+// they are, so the app never cuts them with an ellipsis.
 const PRESS = '\u2007'
 const BUTTON_CELLS = 3 * BUTTON_BOX + 3 // three buttons, each a cell from the last
 const TEXT = '#8b8b90'
@@ -1209,7 +1210,8 @@ const DIM = '#5d6370' // a port nothing listens on yet
 const BUTTON_GROUND = '#2a2a2d'
 const RULE = '#3a3a3e'
 const TIP = { name: '#b9b9be', dim: '#7d7d83', card: '#262629', border: '#3d3f45' } // the tooltips: soft grey text; in a pane, on a card of their own
-const EMPTY_GROUND = '#232326' // under an empty state's note
+const EMPTY_GROUND = '#1f1f21' // under an empty state's note: a shade off the pane, barely there
+const EMPTY_ART = '#4a4a4f' // its drawing, a step under the text's grey
 const FONTS = "-apple-system, 'SF Pro Text', system-ui, sans-serif"
 const MONO = "ui-monospace, 'SF Mono', Menlo, monospace"
 
@@ -1352,7 +1354,7 @@ export function emptySvg(sentences: string[], width: number, art: string) {
   const height = Math.max(box.h, textHeight) + 2 * pad
   const top = (height - textHeight) / 2
   const text = lines.map((line, i) => `<text x="${x}" y="${top + 12 + i * 18}" fill="${TEXT}" font-size="${SMALL}" xml:space="preserve">${esc(line)}</text>`).join('')
-  const drawing = `<g transform="translate(${pad} ${(height - box.h) / 2}) scale(0.8)" fill="none" stroke="${OFF}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${art}</g>`
+  const drawing = `<g transform="translate(${pad} ${(height - box.h) / 2}) scale(0.8)" fill="none" stroke="${EMPTY_ART}" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${art}</g>`
   return `${svgOpen(width, height + 8)}<rect x="0" y="0" width="${width}" height="${height}" rx="6" fill="${EMPTY_GROUND}"/>${drawing}${text}</svg>`
 }
 
@@ -1360,7 +1362,7 @@ export function emptySvg(sentences: string[], width: number, art: string) {
 // planted yet, drawn 1.2 times its size from the pot's foot, its stroke thinned to match the night scene's.
 const POTTED_CACTUS = [
   '<g transform="translate(41 57) scale(1.2) translate(-41 -54)" stroke-width="1.33">',
-  `<path d="M28 44h26l-2 10H30z" fill="${OFF}" fill-opacity="0.12"/>`,
+  `<path d="M28 44h26l-2 10H30z" fill="${EMPTY_ART}" fill-opacity="0.1"/>`,
   '<path d="M38 44V30a3 3 0 0 1 6 0v14M38 38h-3a2.5 2.5 0 0 1-2.5-2.5V32M44 36h3a2.5 2.5 0 0 0 2.5-2.5V30"/>',
   '</g>',
 ].join('')
@@ -1369,7 +1371,7 @@ const POTTED_CACTUS = [
 const NIGHT = [
   '<path d="M8 52h64"/>',
   '<path d="M64 10a6 6 0 1 0 4 9 5 5 0 0 1-4-9z"/><path d="M48 12v3M46.5 13.5h3M14 14v2M13 15h2"/>',
-  `<path d="M26 52V20a3.5 3.5 0 0 1 7 0v32M26 38h-4a3 3 0 0 1-3-3v-6M33 33h4a3 3 0 0 0 3-3v-5" fill="${OFF}" fill-opacity="0.12"/>`,
+  `<path d="M26 52V20a3.5 3.5 0 0 1 7 0v32M26 38h-4a3 3 0 0 1-3-3v-6M33 33h4a3 3 0 0 0 3-3v-5" fill="${EMPTY_ART}" fill-opacity="0.1"/>`,
   '<path d="M50 52V36a2.5 2.5 0 0 1 5 0v16M55 44h3a2 2 0 0 0 2-2v-3"/>',
 ].join('')
 
