@@ -60,9 +60,12 @@ Only processes running from a folder in your home are kept: apps opened from the
 
 Requires Claude Code 2.1.287 or later, on macOS.
 
-```bash
-claude --plugin-dir /path/to/claude-mod-quiet-server
+```sh
+claude plugin marketplace add arthurglaizal/quiet-server
+claude plugin install quiet-server@quiet-server
 ```
+
+To try a working copy instead: `claude --plugin-dir /path/to/claude-mod-quiet-server`.
 
 ## License
 
