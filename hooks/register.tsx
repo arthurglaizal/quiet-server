@@ -23,9 +23,8 @@ const IGNORED = /^(claude|codex)$/i // assistants listening for their own reason
 // Never a server, never climbed through when stopping one: apps, the program in an app's MacOS folder (Claude's own
 // binary among them), and assistants. Python.app is no app: it is how macOS's own python3 runs, from Xcode's folder.
 const FOREIGN = /(?<!Python)\.app\/Contents\/MacOS\/|(^|\/)(claude|codex)(\s|$)|@anthropic-ai\/claude-code|@openai\/codex/
-const GLYPH = { running: '◉', ready: '○', starting: '◌', stopping: '◉', preview: '⊞', open: '↗', stop: '■', start: '▶' } as const
+const GLYPH = { running: '◉', ready: '○', starting: '◌', stopping: '◉', copy: '⧉', open: '↗', stop: '■', start: '▶' } as const
 const TOGGLE_GLYPH = '⊙' // the footer's button: an eye seen from the front (the eye character is drawn as a color emoji)
-const BROWSER = 'Claude_Browser' // the desktop app's own browser, served to the session as an MCP server
 // What the two "ask Claude" buttons put in the prompt box, for the person to complete or send.
 const ASK = {
   add: 'Add a dev server to this project\'s .claude/launch.json (name, runtimeExecutable, runtimeArgs, port): ',
@@ -131,9 +130,9 @@ export const register: Register = on => {
       const iconButton = (b: { key: string; svg: string; tip: string; press: () => void }) => (
         <Box key={`${b.key}-box`} width={BUTTON_BOX} height={1} marginLeft={1} justifyContent="center" alignItems="center">
           <Svg source={b.svg} alt={b.tip} width={BTN_W} height={BTN_H} />
-          <Box position="absolute" top={0} left={0} width={BUTTON_BOX + 1} height={1}>
+          <Box position="absolute" top={0} left={0} width={BUTTON_BOX} height={1} justifyContent="center">
             <Button key={b.key} plain onPress={b.press}>
-              {PRESS.repeat(BUTTON_BOX)}
+              {press(BUTTON_BOX)}
             </Button>
           </Box>
           {tip(b.tip)}
@@ -145,9 +144,9 @@ export const register: Register = on => {
         return (
           <Box key={`${b.key}-box`} width={width} height={1} marginLeft={2}>
             <Svg source={wordSvg(b.label, width * PX_PER_COLUMN, b.glyph, b.isWarm)} alt={b.label} />
-            <Box position="absolute" top={0} left={0} width={width + 1} height={1}>
+            <Box position="absolute" top={0} left={0} width={width} height={1}>
               <Button key={b.key} plain onPress={b.press}>
-                {PRESS.repeat(width)}
+                {press(width)}
               </Button>
             </Box>
             {tip(b.tip)}
@@ -158,9 +157,9 @@ export const register: Register = on => {
       const smallButton = (b: { key: string; svg: string; tip: string; press: () => void }) => (
         <Box key={`${b.key}-box`} width={2} height={1} marginLeft={2} justifyContent="center" alignItems="center">
           <Svg source={b.svg} alt={b.tip} width={ICON} height={ICON} />
-          <Box position="absolute" top={0} left={0} width={3} height={1}>
+          <Box position="absolute" top={0} left={0} width={2} height={1} justifyContent="center">
             <Button key={b.key} plain onPress={b.press}>
-              {PRESS.repeat(2)}
+              {press(2)}
             </Button>
           </Box>
           {tip(b.tip)}
@@ -179,9 +178,8 @@ export const register: Register = on => {
         </Box>
       )
       // A server on two lines. The state is a drawing of its own that stays the same between reads, so its wave
-      // keeps moving; the port, when something listens on it, copies the URL.
+      // keeps moving; the port is a label beside its buttons.
       const rowView = (row: Row) => {
-        const live = row.state === 'running' && row.port !== undefined
         return (
           <Box key={row.key} flexDirection="row" alignItems="center">
             <Svg source={indicatorSvg(row.state, phases.get(row.key))} alt={row.state} width={IND_W} height={ROW_H} />
@@ -189,17 +187,9 @@ export const register: Register = on => {
               <Svg source={rowSvg(row, textWidth)} alt={rowAlt(row)} />
             </Box>
             <Box flexGrow={1} />
-            {/* Keyed: a tip shows while the pointer is over its nearest keyed Box, so this one only over the port. */}
-            <Box key={`${row.key}:port-box`} width={TAG_CELLS} height={1} flexDirection="row" justifyContent="flex-end" alignItems="center">
+            {/* The port, a label: the row's own button copies the address. */}
+            <Box width={TAG_CELLS} height={1} flexDirection="row" justifyContent="flex-end" alignItems="center">
               {row.port !== undefined && <Svg source={portSvg(row)} alt={`port ${row.port}`} />}
-              {live && (
-                <Box position="absolute" top={0} right={0} width={TAG_CELLS + 1} height={1}>
-                  <Button key={`${row.key}:copy`} plain onPress={copyPort(row)}>
-                    {PRESS.repeat(TAG_CELLS)}
-                  </Button>
-                </Box>
-              )}
-              {live && tip('Copy URL')}
             </Box>
             <Box width={BUTTON_CELLS} flexDirection="row" justifyContent="flex-end">
               {actions(row).map(a => iconButton({ key: `${row.key}:${a.kind}`, svg: buttonSvg(a.kind), tip: a.tip, press: a.press }))}
@@ -281,7 +271,7 @@ export const register: Register = on => {
             <Box flexGrow={1} />
             <Box width={TAG_CELLS} flexShrink={0} flexDirection="row" justifyContent="flex-end">
               {live ? (
-                <Button key={`${row.key}:copy`} plain onPress={copyPort(row)}>
+                <Button key={`${row.key}:port`} plain onPress={copyPort(row)}>
                   {`:${row.port}`}
                 </Button>
               ) : (
@@ -358,9 +348,9 @@ export function overTheNext(node: any): any {
 
 // ——— What a row and a section offer ———
 
-type Action = { kind: 'preview' | 'open' | 'stop' | 'start'; tip: string; press: () => void }
+type Action = { kind: 'copy' | 'open' | 'stop' | 'start'; tip: string; press: () => void }
 
-// A running server: open it in Claude's browser (the desktop app has one), in the default browser, or stop it.
+// A running server: copy its address, open it in the default browser, or stop it.
 function rowActions($: EngineInterface, s: Snapshot, row: Row, surface: string): Action[] {
   return isDemo ? realActions($, s, row, surface).map(a => ({ ...a, press: demoPress($) })) : realActions($, s, row, surface)
 }
@@ -372,12 +362,11 @@ function realActions($: EngineInterface, s: Snapshot, row: Row, surface: string)
   if (row.state === 'ready') {
     if (!row.launchable) return []
     const l = row.launchable
-    // Claude's browser launches it first, then opens it once its port listens.
-    return [...(surface === 'desktop' ? [{ kind: 'preview' as const, tip: 'Launch and open in Claude', press: () => void launchAndPreview($, l) }] : []), { kind: 'start', tip: 'Launch', press: () => void start($, l) }]
+    return [{ kind: 'start', tip: 'Launch', press: () => void start($, l) }]
   }
   const url = row.port ? `http://localhost:${row.port}` : undefined
   const out: Action[] = []
-  if (url && surface === 'desktop') out.push({ kind: 'preview', tip: 'Open in Claude', press: () => void preview($, url) })
+  if (url && surface === 'desktop') out.push({ kind: 'copy', tip: 'Copy address', press: () => void copy($, url, surface) }) // the terminal's port copies it
   if (url) out.push({ kind: 'open', tip: 'Open in browser', press: () => void open($, url) })
   out.push({ kind: 'stop', tip: 'Stop', press: () => void stop($, s, row.server!) })
   return out
@@ -804,31 +793,6 @@ async function togglePane($: EngineInterface) {
   return opened.isPlaced ? 'Servers pane opened' : `Servers pane waiting: ${opened.reason}`
 }
 
-// Claude's own browser: a tab at the URL, through the browser the desktop app serves the session.
-// Says why, when it fails: the server's own words, or the refusal's.
-async function preview($: EngineInterface, url: string) {
-  const done = await $.mcp.call(BROWSER, 'preview_start', { url }).catch((error: unknown) => ({ isError: true, content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }] }))
-  if (!done.isError) return
-  const said = (done.content as { type: string; text?: string }[]).find(c => c.type === 'text')?.text ?? ''
-  void $.ui.toast(`Could not open it in Claude's browser${said ? `: ${said.slice(0, 140)}` : ''}`)
-}
-
-// Launches a server, then opens it in Claude's browser once it listens: its port, as the next reads find it, for
-// up to 30 s.
-async function launchAndPreview($: EngineInterface, l: Launchable) {
-  await start($, l)
-  const deadline = (await $.clock.now()) + 30_000
-  const check = async () => {
-    const s = await read($, snapshot)
-    const row = s ? sections(s).here.find(r => r.launchable?.id === l.id && r.server && r.port !== undefined) : undefined
-    if (row) return void (await preview($, `http://localhost:${row.port}`))
-    if ((await $.clock.now()) > deadline) return void $.ui.toast(`${l.name} is not listening yet: open it once its port shows`)
-    await refresh($)
-    $.clock.after(1500, () => void check().catch(() => {}))
-  }
-  $.clock.after(1500, () => void check().catch(() => {}))
-}
-
 async function open($: EngineInterface, url: string) {
   const done = await run($, [BIN.open, url])
   if (done.exitCode !== 0) void $.ui.toast(`Could not open ${url}: ${done.stderr.trim().slice(0, 140) || `exit ${done.exitCode}`}`)
@@ -1086,8 +1050,13 @@ export function describe(commands: string) {
 
 const SERVES = [/\bnext (dev|start)\b/, /\bvite(\s+(dev|serve|preview)|\s+--|\s*$)/, /\b(astro|nuxt|remix) (dev|preview)\b/, /storybook dev|start-storybook/, /webpack (serve|-dev-server)|webpack-dev-server/, /\bhttp-server\b|\bserve\b/, /\bnodemon\b|\buvicorn\b|flask run|runserver|\brails s(erver)?\b|wrangler dev|expo start/]
 
+// A script that serves: named so (dev, start, serve, preview, storybook, and their dev:web kind), or running a known
+// server. Not one that builds or checks, nor one that only controls a server (dev:stop, `astro dev status`).
+const CONTROLS = /(^|:)(stop|status|kill|restart|logs?|ps|open|types|dry-run)($|:)/
+const CONTROL_COMMAND = /\s(stop|status|kill|restart|logs?)(\s|$)/
 export function isServerScript(name: string, command: string) {
   if (/(^|:)(build|test|lint|format|typecheck|clean|deploy|release|prepare|postinstall)($|:)/.test(name)) return false
+  if (CONTROLS.test(name) || CONTROL_COMMAND.test(command)) return false
   return /^(dev|start|serve|preview|storybook)($|:)/.test(name) || SERVES.some(re => re.test(command))
 }
 
@@ -1194,16 +1163,18 @@ const TAG_H = 20 // the port
 const TAG_CELLS = 8 // ":65535" at most, right-aligned
 const BTN_W = 24
 const BTN_H = 22
-const BUTTON_BOX = 3 // a button's cells
-// What fills an empty button laid over a drawing: a figure space, as wide as a digit, so the press area and its
-// hover take about the cells the drawing does (a no-break space is a third of that). Their box is a cell wider than
-// they are, so the app never cuts them with an ellipsis.
-const PRESS = '\u2007'
+const BUTTON_BOX = 4 // a button's cells: its 24 px drawing, and a cell to spare so the press area can take a fourth space
+// What fills an empty button laid over a drawing `cells` wide: no-break spaces, the only space the desktop does not
+// cut with an ellipsis drawn over the button. It cuts any label wider than the box less the button's own padding
+// (PRESS_PAD); a no-break space is about PRESS_SPACE px. Up to four cells, a space to a cell.
+const PRESS_PAD = 14
+const PRESS_SPACE = 3.6
+const press = (cells: number) => '\u00A0'.repeat(cells <= 4 ? cells : Math.floor((cells * PX_PER_COLUMN - PRESS_PAD) / PRESS_SPACE))
 const BUTTON_CELLS = 3 * BUTTON_BOX + 3 // three buttons, each a cell from the last
 const TEXT = '#8b8b90'
 const SOFT = '#c4c4c9'
 const BRIGHT = '#e8e8ea'
-const TAG_GROUND = '#2e2e32' // under the port of what runs
+const TAG_LINE = '#3a3a3e' // around the port of what runs
 const OFF = '#6e6e73' // the empty dot of what does not run
 const DARK = '#5d5d62' // the rest of a row that does not run: it steps back, what runs stands out
 const DIM = '#5d6370' // a port nothing listens on yet
@@ -1273,24 +1244,24 @@ function metaSpans(parts: Part[], width: number, color = TEXT) {
   return spans.join('')
 }
 
-// The port: light on a faint ground while a server listens on it, dim for the one a launch would take, orange
-// when another server holds it.
+// The port, a label rather than a button: light inside a thin outline while a server listens on it, dim for the one
+// a launch would take, orange when another server holds it.
 export function portSvg(row: Row) {
   const label = `:${row.port}`
   const width = Math.round(label.length * MONO_WIDTH + 12)
   const live = row.state === 'running'
   const warm = row.note !== undefined
-  const ground = live ? `<rect width="${width}" height="${TAG_H}" rx="3" fill="${TAG_GROUND}"/>` : ''
+  const ground = live ? `<rect x="0.5" y="0.5" width="${width - 1}" height="${TAG_H - 1}" rx="3" fill="none" stroke="${TAG_LINE}"/>` : ''
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${TAG_H}" viewBox="0 0 ${width} ${TAG_H}">${ground}<text x="${width / 2}" y="14" text-anchor="middle" fill="${warm ? ORANGE : live ? SOFT : DIM}" font-family="${MONO}" font-size="${SMALL}"${warm ? ' font-weight="600"' : ''}>${esc(label)}</text></svg>`
 }
 
-// A row's button: a filled stop on a faint ground, the two opens as strokes on it (a window for Claude's browser,
-// an arrow out of a box for the default one); the play of a row that does not run is a grey outline, no ground.
+// A row's button, on a faint ground: a filled play or stop, the copy and the open as strokes (two sheets for the
+// address, an arrow out of a box for the default browser).
 export function buttonSvg(kind: Action['kind']) {
   const size = kind === 'start' || kind === 'stop' ? 11 : 13
   const stroke = (d: string) => `<path d="${d}" fill="none" stroke="${SOFT}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`
-  const icon = kind === 'start' ? PLAY(TEXT) : kind === 'stop' ? SQUARE(SOFT) : stroke(kind === 'preview' ? 'M3 5h18v14H3zM3 9h18' : 'M13 5h6v6M19 5l-8 8M17 14v5H5V7h5')
-  const ground = kind === 'start' ? `<rect x="0.5" y="0.5" width="${BTN_W - 1}" height="${BTN_H - 1}" rx="5" fill="none" stroke="${RULE}"/>` : `<rect width="${BTN_W}" height="${BTN_H}" rx="5" fill="${BUTTON_GROUND}"/>`
+  const icon = kind === 'start' ? PLAY(SOFT) : kind === 'stop' ? SQUARE(SOFT) : stroke(kind === 'copy' ? 'M9 9h10v10H9zM15 9V5H5v10h4' : 'M13 5h6v6M19 5l-8 8M17 14v5H5V7h5')
+  const ground = `<rect width="${BTN_W}" height="${BTN_H}" rx="5" fill="${BUTTON_GROUND}"/>`
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${BTN_W}" height="${BTN_H}" viewBox="0 0 ${BTN_W} ${BTN_H}">${ground}<g transform="translate(${(BTN_W - size) / 2} ${(BTN_H - size) / 2}) scale(${size / 24})">${icon}</g></svg>`
 }
 

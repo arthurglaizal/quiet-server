@@ -7,10 +7,10 @@
     {
       "name": "quiet-server",
       "source": "./",
-      "description": "The dev servers of the project and branch you work on: a count in the status line, and /quiet-server opens a pane to launch, open or stop them, with every other server on the machine grouped by project."
+      "description": "Launch your servers without leaving the conversation and catch the ones still running elsewhere: a count in the status line, and /quiet-server opens a pane to launch, open or stop them, with every other server on the machine grouped by project."
     }
   ],
   "metadata": {
-    "description": "Quiet Server: your dev servers, tied to the conversation."
+    "description": "Quiet Server: launch your servers without leaving the conversation."
   }
 }

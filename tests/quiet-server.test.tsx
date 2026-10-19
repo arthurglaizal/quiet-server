@@ -69,7 +69,7 @@ function engine(on: any) {
   const ran: string[][] = []
   const statuses: (string | undefined)[] = []
   const opened: string[] = []
-  const browsed: unknown[] = []
+  const copied: string[] = []
   const filled: string[] = []
   const done = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
   on('session.start', (_$: any, e: any) => ({ sessionId: 's', cwd: e.cwd }))
@@ -88,7 +88,8 @@ function engine(on: any) {
   on('ui.render', ($: any, e: any) => $.ui.resolve(e).Text({ children: 'focus' })) // the mode labels Claude Code draws in the footer
   on('ui.panes', () => ({ value: [] }))
   on('prompt.fill', (_$: any, e: any) => (filled.push(e.text), { isFilled: true, text: e.text, cursor: e.text.length }))
-  on('mcp.call', (_$: any, e: any) => (browsed.push([e.server, e.tool, e.args]), { value: { content: [], isError: false } }))
+  on('ui.copy', (_$: any, e: any) => (copied.push(e.text), { value: { isCopied: true } }))
+  on('ui.toast', () => ({ value: undefined }))
   on('ui.open', (_$: any, e: any) => (opened.push(e.id), { value: { isPlaced: true } }))
   on('process.run', (_$: any, e: any) => {
     const argv: string[] = [...e.argv]
@@ -102,7 +103,7 @@ function engine(on: any) {
     }
     return done('')
   })
-  return { ran, statuses, opened, browsed, filled }
+  return { ran, statuses, opened, copied, filled }
 }
 
 const settle = () => new Promise(done => (globalThis as any).setTimeout(done, 30)) // the first read runs in the background
@@ -190,6 +191,11 @@ describe('quiet-server', () => {
     expect(isServerScript('web', 'vite')).toBe(true)
     expect(isServerScript('bundle', 'vite build')).toBe(false)
     expect(isServerScript('lint', 'eslint .')).toBe(false)
+    expect(isServerScript('dev:stop', 'astro dev stop')).toBe(false) // controls a server, serves nothing
+    expect(isServerScript('dev:status', 'astro dev status')).toBe(false)
+    expect(isServerScript('worker:types', 'wrangler types')).toBe(false)
+    expect(isServerScript('dev:web', 'vite')).toBe(true)
+    expect(isServerScript('dev', 'astro dev --background')).toBe(true)
     expect(portOf('storybook dev -p 6006')).toBe(6006)
     expect(portOf('PORT=4000 node server.js')).toBe(4000)
     expect(portOf('next dev')).toBeUndefined()
@@ -373,20 +379,19 @@ describe('quiet-server', () => {
   })
 
   test('the desktop pane draws SVG rows with their buttons', async ($, on) => {
-    const { ran, browsed } = engine(on)
+    const { ran, copied } = engine(on)
     await $.session.start({ surface: 'desktop', isInteractive: true, cwd: SHOP } as any)
     await settle()
     const pane = await $.ui.mount({ plugin: 'quiet-server', surface: 'desktop', ...PANE } as any)
     expect(await pane.find({ type: 'Svg' })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: 'Open in browser' })).toBeDefined() // a button's tooltip
-    expect(await pane.find({ type: 'Text', text: 'Launch and open in Claude' })).toBeDefined() // a server ready to launch opens in Claude too
-    await pane.press({ key: 'pid:100:preview' })
-    expect(browsed).toEqual([['Claude_Browser', 'preview_start', { url: 'http://localhost:3000' }]]) // Claude's own browser
+    await pane.press({ key: 'pid:100:copy' })
+    expect(copied).toEqual(['http://localhost:3000']) // its address
     await pane.press({ key: 'pid:100:open' })
     expect(ran.some(a => a[0] === '/usr/bin/open' && a[1] === 'http://localhost:3000')).toBe(true)
     await pane.press({ key: 'pid:100:stop' })
     expect(ran.find(a => a[0] === '/bin/kill')).toEqual(['/bin/kill', '-TERM', '99', '100', '101']) // the launcher and everything it runs
-    expect(await pane.find({ type: 'Text', text: 'Copy URL' })).toBeDefined() // the port copies the URL
+    expect(await pane.find({ type: 'Text', text: 'Copy URL' })).toBeUndefined() // the port is a label: its row's button copies
     await pane.unmount()
   })
 
