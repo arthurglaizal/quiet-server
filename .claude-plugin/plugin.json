@@ -7,6 +7,8 @@
     "url": "https://github.com/arthurglaizal"
   },
   "types": "./types/index.d.ts",
+  "homepage": "https://github.com/arthurglaizal/quiet-server",
+  "repository": "https://github.com/arthurglaizal/quiet-server",
   "license": "MIT",
   "keywords": [
     "dev-server",
