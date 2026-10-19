@@ -614,7 +614,7 @@ async function tick($: EngineInterface) {
 // The count in the status line, unless /quiet-server status hid it.
 // /quiet-server status and the pane's switch: the choice is kept across sessions.
 async function toggleStatus($: EngineInterface) {
-  const hidden = await update($, isStatusHidden, h => !h)
+  const hidden = await update($, isStatusHidden, wasHidden => !wasHidden)
   await $.store.set('isStatusHidden', hidden).catch(() => {})
   await showStatus($)
   return hidden
@@ -731,8 +731,8 @@ async function scanServers($: EngineInterface, home: string, now: number): Promi
 
 // ——— Acting on a server ———
 
-async function mark($: EngineInterface, key: string, on: boolean) {
-  await update($, busy, list => (on ? [...new Set([...list, key])] : list.filter(k => k !== key)))
+async function mark($: EngineInterface, key: string, isBusy: boolean) {
+  await update($, busy, list => (isBusy ? [...new Set([...list, key])] : list.filter(k => k !== key)))
 }
 
 // Runs the entry through the person's login shell, so it finds node and npm as their terminal does. The server
