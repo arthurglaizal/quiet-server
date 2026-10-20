@@ -20,11 +20,11 @@ quiet-server  0/3 here  1 elsewhere
 
 **`/quiet-server`** opens or closes a pane in two sections, one under the other.
 
-- **This project**
+- **This project**, its name under the title
   - *The conversation's branch*, tagged `here` (hover it for what it means): its servers that run, then what it can launch: the `package.json` scripts that serve (`dev`, `start`, `serve`, `preview`, `storybook`…, but not the ones that only control a server, like `dev:stop` or `dev:status`) and the entries of `.claude/launch.json`, the file the desktop app's previews already read.
   - *Other branches*, one group each under a chevron: `main` first, with an anchor, then every other worktree of the repository, each with what runs and what it can launch. This branch, `main` and any branch where a server runs are open; the others stay folded, their head saying what they hold (`1 running · 3 to launch`). A fold you press is kept.
   - *Branches with no worktree*: folded on one line, each with **Create worktree**. A server needs a folder checked out on its branch, so `main` without one shows the same button.
-- **Running elsewhere**: every other dev server on the machine, grouped by project, each group headed by its branch and the folder it sits in (`claude-mod-quiet-cost  ⑂ main  ~/…/2026 Claude mods`).
+- **Running elsewhere**: every other dev server on the machine, grouped by project, each group headed by its name and the folder it sits in (`migration-framer-to-vibecode · ~/…/2026 Migration Framer Vibecode`), then a line per branch it runs from: two worktrees of one repository are one project.
 
 Each server takes two lines: its name and what it is (`dev  Next.js app`), then what started it, how long it has been running, memory and CPU. What started it: `this pane`, `Claude, this conversation`, `Claude, another conversation`, the terminal app (`iTerm`, `Terminal`, `VS Code`…), or `detached` when what launched it is gone. A running server shows a small wave drifting slowly in a ring; one ready to launch, an empty dot. Its port sits on the right, in a thin outline while something listens on it.
 

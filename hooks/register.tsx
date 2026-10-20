@@ -224,32 +224,36 @@ export const register: Register = on => {
       // A branch's head: the chevron, its glyph, its name, then "here" or what it holds. The whole head folds the
       // group; "here" explains itself on hover; a group with servers to launch has its own Launch.
       const branchHeader = (br: Head) => {
-        const drawing = branchHeadSvg(br, drawn - (br.launch ? 100 : 0))
+        const drawing = branchHeadSvg({ ...br, isSpaced: false }, drawn - (br.launch ? 100 : 0))
         const cells = Math.ceil(drawing.width / PX_PER_COLUMN)
+        // The room above a group is a drawing of its own: the empty button over the head then covers the name alone.
         return (
-          <Box key={`${br.key}-head`} flexDirection="row" alignItems="center">
-            <Box flexShrink={1}>
-              <Svg source={drawing.svg} alt={[br.name, br.isHere ? 'this conversation' : br.summary, br.isOpen ? 'open' : 'folded'].filter(Boolean).join(', ')} />
-              <Box position="absolute" top={0} left={0} width={cells} height={1}>
-                <Button key={`toggle:${br.key}`} plain onPress={br.toggle}>
-                  {press(cells)}
-                </Button>
-              </Box>
-              {drawing.tag && (
-                <Box position="absolute" top={0} left={Math.floor(drawing.tag.x / PX_PER_COLUMN)} width={Math.ceil(drawing.tag.width / PX_PER_COLUMN)} height={1}>
-                  {tip(HERE_TIP, 'left')}
+          <Box key={`${br.key}-head`} flexDirection="column">
+            {br.isSpaced && <Svg source={spaceSvg(8)} alt="" />}
+            <Box flexDirection="row" alignItems="center">
+              <Box flexShrink={1}>
+                <Svg source={drawing.svg} alt={[br.name, br.isHere ? 'this conversation' : br.summary, br.isOpen ? 'open' : 'folded'].filter(Boolean).join(', ')} />
+                <Box position="absolute" top={0} left={0} width={cells} height={1}>
+                  <Button key={`toggle:${br.key}`} plain onPress={br.toggle}>
+                    {press(cells)}
+                  </Button>
                 </Box>
-              )}
+                {drawing.tag && (
+                  <Box position="absolute" top={0} left={Math.floor(drawing.tag.x / PX_PER_COLUMN)} width={Math.ceil(drawing.tag.width / PX_PER_COLUMN)} height={1}>
+                    {tip(HERE_TIP, 'left')}
+                  </Box>
+                )}
+              </Box>
+              <Box flexGrow={1} />
+              {br.launch && wordButton({ key: `group-launch:${br.key}`, label: 'Launch', tip: `Launch ${br.launch.names.join(', ')}`, glyph: 'start', press: br.launch.press })}
             </Box>
-            <Box flexGrow={1} />
-            {br.launch && wordButton({ key: `group-launch:${br.key}`, label: 'Launch', tip: `Launch ${br.launch.names.join(', ')}`, glyph: 'start', press: br.launch.press })}
           </Box>
         )
       }
       const worktreeButton = (branch: string) => wordButton({ key: `worktree:${branch}`, label: 'Create worktree', tip: `Ask Claude to create a worktree for ${branch}`, press: makeTree(branch) })
       const note = (key: string, text: string, branch?: string) => (
         <Box key={key} flexDirection="row" alignItems="center">
-          <Svg source={captionSvg(text, textWidth, false, IND_W)} alt={text} />
+          <Svg source={captionSvg(text, drawn - 160, false, IND_W)} alt={text} />
           <Box flexGrow={1} />
           {branch !== undefined && worktreeButton(branch)}
         </Box>
@@ -287,8 +291,13 @@ export const register: Register = on => {
           {v.elsewhere.length === 0 && <Svg source={emptySvg(['Nothing else is running.'], drawn, NIGHT)} alt="Nothing else is running." />}
           {groups(v.elsewhere).map((g, i) => (
             <Box key={g.key} flexDirection="column">
-              <Svg source={groupSvg(g, drawn, i > 0)} alt={[g.name, g.branch, g.folder].filter(Boolean).join(', ')} />
-              {g.rows.map(rowView)}
+              <Svg source={groupSvg(g, drawn, i > 0)} alt={[g.name, g.folder].join(', ')} />
+              {g.trees.map(t => (
+                <Box key={t.key} flexDirection="column">
+                  {t.branch && <Svg source={captionSvg(t.branch, drawn, true)} alt={`branch ${t.branch}`} />}
+                  {t.rows.map(rowView)}
+                </Box>
+              ))}
             </Box>
           ))}
           <Box height={2} />
@@ -444,9 +453,14 @@ export const register: Register = on => {
           <Box key={g.key} flexDirection="column" marginTop={i > 0 ? 1 : 0}>
             <Text wrap="truncate-end">
               <Text>{g.name}</Text>
-              <Text dimColor>{`${g.branch ? `  ⑂ ${g.branch}` : ''}  ${g.folder}`}</Text>
+              <Text dimColor>{`  ${g.folder}`}</Text>
             </Text>
-            {g.rows.map(termRow)}
+            {g.trees.map(t => (
+              <Box key={t.key} flexDirection="column">
+                {t.branch && <Text dimColor wrap="truncate-end">{`⑂ ${t.branch}`}</Text>}
+                {t.rows.map(termRow)}
+              </Box>
+            ))}
           </Box>
         ))}
       </Box>
@@ -728,16 +742,19 @@ function readyRow(l: Launchable, place: { top: string; branch: string }, servers
   }
 }
 
-// Running elsewhere, by project: one group per working tree, headed by its project, branch and folder, in the
-// order the rows come (by project, then port).
-export type Group = { key: string; name: string; branch: string; folder: string; rows: Row[] }
+// Running elsewhere, by project: one group per repository, headed by its name and the folder it sits in, then a
+// line per working tree it runs from, headed by its branch, in the order the rows come (by project, then port).
+export type Tree = { key: string; branch: string; rows: Row[] }
+export type Group = { key: string; name: string; folder: string; trees: Tree[] }
 export function groups(rows: Row[]): Group[] {
   const out = new Map<string, Group>()
   for (const r of rows) {
     const sv = r.server!
-    const g = out.get(sv.top) ?? { key: `group:${sv.top}`, name: sv.projectName, branch: sv.branch, folder: folderOf(sv.top), rows: [] }
-    g.rows.push(r)
-    out.set(sv.top, g)
+    const home = sv.repo.endsWith('/.git') ? sv.repo.slice(0, -5) : sv.top // the main worktree, where the repository sits
+    const g = out.get(sv.repo) ?? { key: `group:${sv.repo}`, name: sv.projectName, folder: folderOf(home), trees: [] }
+    const t = g.trees.find(x => x.key === `tree:${sv.top}`) ?? (g.trees.push({ key: `tree:${sv.top}`, branch: sv.branch, rows: [] }), g.trees.at(-1)!)
+    t.rows.push(r)
+    out.set(sv.repo, g)
   }
   return [...out.values()]
 }
@@ -1391,6 +1408,7 @@ const SMALL = 12 // descriptions, the second line, captions
 const TITLE_FONT = 16
 const CHAR_WIDTH = 7.3 // an estimate of a character's width at FONT
 const SMALL_WIDTH = 6.7 // the same at SMALL
+const NAME_WIDTH = 6.1 // a branch's name at SMALL, lower case and slashes
 const MONO_WIDTH = 7.3 // the port's monospaced digits, at SMALL
 const ROW_H = 44 // a server: two lines
 const LINE1 = 18 // their baselines
@@ -1547,7 +1565,7 @@ export function branchHeadSvg(br: Pick<Head, 'name' | 'icon' | 'isOpen' | 'isHer
   let end = x + name.length * SMALL_WIDTH
   let tag: { x: number; width: number } | undefined
   if (br.isHere) {
-    tag = { x: end + 8, width: 52 }
+    tag = { x: x + name.length * NAME_WIDTH + 8, width: 52 } // a branch name is mostly lower case: narrower than the estimate
     parts.push(
       `<rect x="${tag.x}" y="${base - 12}" width="${tag.width}" height="16" rx="4" fill="${HERE_GROUND}"/>`,
       strokeIcon(ICONS.pin, tag.x + 6, base - 9.5, 11, BRIGHT),
@@ -1563,6 +1581,11 @@ export function branchHeadSvg(br: Pick<Head, 'name' | 'icon' | 'isOpen' | 'isHer
   return { svg: `${svgOpen(width, top + CAPTION_H)}${parts.join('')}</svg>`, width, tag }
 }
 
+// Room between two groups, `height` px.
+export function spaceSvg(height: number) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1" height="${height}" viewBox="0 0 1 ${height}"></svg>`
+}
+
 // The project's name, under "This project": the brighter grey, at the small size, a little room below it.
 export function projectSvg(name: string, width: number) {
   return `${svgOpen(width, CAPTION_H)}<text x="0" y="${CAPTION_BASE - 4}" fill="${SOFT}" font-size="${SMALL}" xml:space="preserve">${esc(fit(name, width, SMALL_WIDTH))}</text></svg>`
@@ -1574,22 +1597,14 @@ export function captionSvg(caption: string, width: number, withBranch = false, i
   return `${svgOpen(width, CAPTION_H)}${withBranch ? branchGlyph(indent, CAPTION_BASE - 10, 12) : ''}<text x="${x}" y="${CAPTION_BASE}" fill="${TEXT}" font-size="${SMALL}" xml:space="preserve">${esc(fit(caption, width - x, SMALL_WIDTH))}</text></svg>`
 }
 
-// A group's head, running elsewhere, in the style of the conversation's branch line: the project in the brighter
-// grey, then its branch with the branch glyph and the folder it sits in, all at the small size, set apart from the
-// group above by a little room.
+// A group's head, running elsewhere: the project in the brighter grey, then the folder it sits in, one text at the
+// small size so the app sets the gap, set apart from the group above by a little room. Its branches follow, each on
+// a line of its own.
 export function groupSvg(g: Group, width: number, isSpaced = false) {
   const top = isSpaced ? 10 : 0
-  const base = top + CAPTION_BASE
-  const name = fit(g.name, width * 0.5, SMALL_WIDTH)
-  const parts = [`<text x="0" y="${base}" font-size="${SMALL}" xml:space="preserve"><tspan fill="${SOFT}">${esc(name)}</tspan><tspan fill="${TEXT}"> · </tspan></text>`]
-  let x = (name.length + 3) * SMALL_WIDTH
-  if (g.branch) {
-    parts.push(branchGlyph(x, base - 10, 12))
-    x += 18
-  }
-  const rest = fit([g.branch, g.folder].filter(Boolean).join(' · '), width - x, SMALL_WIDTH)
-  parts.push(`<text x="${x}" y="${base}" fill="${TEXT}" font-size="${SMALL}" xml:space="preserve">${esc(rest)}</text>`)
-  return `${svgOpen(width, top + CAPTION_H)}${parts.join('')}</svg>`
+  const name = fit(g.name, width * 0.6, SMALL_WIDTH)
+  const folder = fit(` · ${g.folder}`, width - name.length * SMALL_WIDTH, SMALL_WIDTH)
+  return `${svgOpen(width, top + CAPTION_H)}<text x="0" y="${top + CAPTION_BASE}" font-size="${SMALL}" xml:space="preserve"><tspan fill="${SOFT}">${esc(name)}</tspan><tspan fill="${TEXT}">${esc(folder)}</tspan></text></svg>`
 }
 
 // The thin line between the two sections, with room under it before the next title.

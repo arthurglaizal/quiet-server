@@ -275,14 +275,20 @@ describe('quiet-server', () => {
     expect(v.loose).toEqual(['design/tokens', 'spike/edge-cache']) // no worktree
     expect(v.branches.map(summaryOf)).toEqual(['1 running · 1 to launch', '2 to launch'])
     const g = groups(v.elsewhere)
-    expect(g.map(x => [x.name, x.branch, x.folder, x.rows.map(r => r.name)])).toEqual([
-      ['api-billing', 'dev', '~/code', ['uvicorn']],
-      ['docs', 'main', '~/code', ['dev', 'storybook']], // one group, two servers
-      ['portfolio', 'main', '~/code', ['vite']],
+    expect(g.map(x => [x.name, x.folder, x.trees.map(t => [t.branch, t.rows.map(r => r.name)])])).toEqual([
+      ['api-billing', '~/code', [['dev', ['uvicorn']]]],
+      ['docs', '~/code', [['main', ['dev', 'storybook']]]], // one group, two servers
+      ['portfolio', '~/code', [['main', ['vite']]]],
     ])
-    expect(g[0]!.rows[0]!.meta[0]!.text).toBe('Claude, another conversation')
-    expect(g[2]!.rows[0]!.meta.map(p => p.text).slice(0, 2)).toEqual(['detached', '3d'])
-    expect(g[2]!.rows[0]!.isForgotten).toBe(true)
+    expect(g[0]!.trees[0]!.rows[0]!.meta[0]!.text).toBe('Claude, another conversation')
+    expect(g[2]!.trees[0]!.rows[0]!.meta.map(p => p.text).slice(0, 2)).toEqual(['detached', '3d'])
+    expect(g[2]!.trees[0]!.rows[0]!.isForgotten).toBe(true)
+
+    // Two worktrees of one repository, elsewhere: one project, a line per branch.
+    const doc = v.elsewhere.find(r => r.server!.projectName === 'docs')!
+    const fork = { ...doc, key: 'pid:1', server: { ...doc.server!, pid: 1, top: '/Users/me/code/docs-next', branch: 'next' } }
+    const two = groups([doc, fork])
+    expect(two.map(x => [x.name, x.trees.map(t => t.branch)])).toEqual([['docs', ['main', 'next']]])
     expect(groupSvg(g[1]!, 600, true)).toContain('~/code')
   })
 
