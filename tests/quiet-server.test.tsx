@@ -22,7 +22,11 @@ import {
   originOf,
   originText,
   packageScripts,
+  branchHeadSvg,
   parseCwds,
+  parseWorktrees,
+  summaryOf,
+  trunkOf,
   parseListeners,
   parsePs,
   portOf,
@@ -59,7 +63,9 @@ const GIT: Record<string, [string, string, string]> = {
   [SHOP_MAIN]: [SHOP_MAIN, `${SHOP}/.git`, 'main'],
   [BLOG]: [BLOG, `${BLOG}/.git`, 'main'],
 }
+const WORKTREES = [`worktree ${SHOP}`, 'HEAD aaa', 'branch refs/heads/feat/login', '', `worktree ${SHOP_MAIN}`, 'HEAD bbb', 'branch refs/heads/main', '', `worktree ${HOME}/code/shop-old`, 'HEAD ccc', 'prunable gitdir file points to non-existent location', ''].join('\n')
 const FILES: Record<string, string> = {
+  [`${SHOP_MAIN}/package.json`]: JSON.stringify({ scripts: { dev: 'next dev', storybook: 'storybook dev -p 6007' } }),
   [`${SHOP}/package.json`]: JSON.stringify({ scripts: { dev: 'next dev', build: 'next build', storybook: 'storybook dev -p 6006', lint: 'eslint .' } }),
   [`${SHOP}/.claude/launch.json`]: JSON.stringify({ version: '0.0.1', configurations: [{ name: 'api', runtimeExecutable: 'uvicorn', runtimeArgs: ['main:app', '--port', '8000'], port: 8000 }] }),
 }
@@ -99,6 +105,9 @@ function engine(on: any) {
     if (argv[0] === '/usr/bin/git') {
       const info = GIT[argv[2]!]
       if (!info) return done('', 128)
+      if (argv.includes('worktree')) return done(WORKTREES)
+      if (argv.includes('for-each-ref')) return done('feat/login\nmain\nspike/x\n')
+      if (argv.includes('refs/remotes/origin/HEAD')) return done('origin/main\n')
       return argv.includes('symbolic-ref') ? done(`${info[2]}\n`) : done(`${info[0]}\n${info[1]}\n`)
     }
     return done('')
@@ -218,7 +227,8 @@ describe('quiet-server', () => {
     expect(v.here[0]!.description).toBe('Next.js app')
     expect(v.here[0]!.meta.map(p => p.text)).toEqual(['Terminal', '12m', '40 MB', '1% CPU']) // what started it; this branch: no need to name it
     expect(v.here[2]!.meta.map(p => p.text)).toEqual(['npm run storybook'])
-    expect(v.other.map(r => [r.name, r.meta[1]!.text])).toEqual([['dev', 'main']]) // another worktree of the same repository
+    expect(v.branches.map(g => [g.branch, g.rows.map(r => r.name)])).toEqual([['main', ['dev']]]) // another worktree of the same repository, found by its server
+    expect(v.other.map(r => r.meta.map(p => p.text)[0])).toEqual(['Terminal']) // its group names the branch: the row does not
     expect(v.elsewhere.map(r => [r.server!.projectName, r.name, r.description])).toEqual([['blog', 'vite', 'Vite app']]) // elsewhere, by script, under its project
     expect(statusText(s)).toBe('1/3 here\u20031 elsewhere')
 
@@ -257,7 +267,13 @@ describe('quiet-server', () => {
     const v = sections(demoSnapshot())
     expect(v.here.map(r => [r.name, r.state])).toEqual([['dev', 'running'], ['storybook', 'ready'], ['preview', 'ready']])
     expect(v.here[0]!.meta[0]!.text).toBe('this pane')
-    expect(v.other.map(r => r.meta.slice(0, 2).map(p => p.text))).toEqual([['iTerm', 'main']])
+    expect(v.branches.map(g => [g.branch, g.isTrunk, g.rows.map(r => [r.name, r.state])])).toEqual([
+      ['main', true, [['dev', 'running'], ['storybook', 'ready']]], // main first
+      ['fix/cart-total', false, [['dev', 'ready'], ['storybook', 'ready']]],
+    ])
+    expect(v.branches[0]!.rows[0]!.meta[0]!.text).toBe('iTerm')
+    expect(v.loose).toEqual(['design/tokens', 'spike/edge-cache']) // no worktree
+    expect(v.branches.map(summaryOf)).toEqual(['1 running · 1 to launch', '2 to launch'])
     const g = groups(v.elsewhere)
     expect(g.map(x => [x.name, x.branch, x.folder, x.rows.map(r => r.name)])).toEqual([
       ['api-billing', 'dev', '~/code', ['uvicorn']],
@@ -306,6 +322,37 @@ describe('quiet-server', () => {
     const extra = packageScripts({ scripts: { start: 'next start', preview: 'vite preview', web: 'vite --port 6006' } }, SHOP, 'npm')
     const rows = sections({ ...s, launchables: [...s.launchables, ...extra] }).here
     expect(launchBatch(rows).map(l => l.name)).toEqual(['api', 'storybook']) // web wants storybook's port: left out
+  })
+
+  test('groups the other branches, main first', () => {
+    expect(parseWorktrees(WORKTREES)).toEqual([
+      { top: SHOP, branch: 'feat/login', isDetached: false },
+      { top: SHOP_MAIN, branch: 'main', isDetached: false },
+    ]) // the one whose folder is gone is left out
+    expect(parseWorktrees(`worktree ${HOME}/x\nHEAD ddd\ndetached\n`)[0]).toMatchObject({ branch: 'detached', isDetached: true })
+    expect(trunkOf(['dev', 'main'], 'origin/dev')).toBe('dev') // what origin names
+    expect(trunkOf(['master', 'feat'], '')).toBe('master')
+    expect(trunkOf(['feat'], '')).toBe('')
+
+    // main with no worktree: its own group, with nothing to launch until one is made.
+    const s = snapshotFixture()
+    const free = sections({ ...s, servers: [s.servers[0]!], worktrees: [], branches: ['feat/login', 'main', 'spike/x'], trunk: 'main' })
+    expect(free.branches.map(g => [g.branch, g.top, g.isTrunk])).toEqual([['main', undefined, true]])
+    expect(summaryOf(free.branches[0]!)).toBe('no worktree')
+    expect(free.loose).toEqual(['spike/x'])
+
+    // A worktree's own launchables, its port held by this branch's server: flagged, and left out of its Launch.
+    const other = `${HOME}/code/shop-fix`
+    const fix = sections({ ...s, worktrees: [{ top: other, branch: 'fix/a', isDetached: false, launchables: packageScripts({ scripts: { dev: 'next dev -p 3000', storybook: 'storybook dev -p 6010' } }, other, 'npm') }] })
+    const g = fix.branches.find(x => x.branch === 'fix/a')!
+    expect(g.rows.map(r => [r.name, r.note])).toEqual([['dev', 'used by feat/login'], ['storybook', undefined]])
+    expect(launchBatch(g.rows).map(l => l.cwd)).toEqual([other])
+
+    // The head: "here" on this branch, with room for its tooltip; what the others hold.
+    const here = branchHeadSvg({ name: 'feat/login', icon: 'branch', isOpen: true, isHere: true }, 600)
+    expect(here.svg).toContain('>here<')
+    expect(here.tag?.x).toBeGreaterThan(34)
+    expect(branchHeadSvg({ name: 'main', icon: 'anchor', isOpen: false, summary: '2 to launch' }, 600).svg).toContain(' · 2 to launch')
   })
 
   test('figures and drawing', () => {
@@ -370,9 +417,11 @@ describe('quiet-server', () => {
     await settle()
     const pane = await $.ui.mount({ plugin: 'quiet-server', surface: 'terminal', ...PANE } as any)
     expect(await pane.find({ type: 'Text', text: 'This project' })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: 'shop' })).toBeDefined() // the project's name, under the title
     expect(await pane.find({ type: 'Text', text: 'feat/login · this conversation' })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: 'storybook' })).toBeDefined()
-    expect(await pane.find({ type: 'Text', text: 'Other branches' })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: 'main' })).toBeDefined() // main's group, from git's worktrees
+    expect(await pane.find({ type: 'Text', text: ' · 1 running · 1 to launch' })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: 'Running elsewhere' })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: 'blog' })).toBeDefined()
     await pane.unmount()
@@ -409,6 +458,21 @@ describe('quiet-server', () => {
     await pane.press({ key: 'ask-add' })
     await pane.press({ key: 'ask-find' })
     expect(filled.map(t => t.split(' ').slice(0, 3).join(' '))).toEqual(['Add a dev', 'Look through this']) // the prompt box, for the person to send
+    await pane.unmount()
+  })
+
+  test('branches fold, "here" explains itself, and a branch with no worktree asks for one', async ($, on) => {
+    const { filled } = engine(on)
+    await $.session.start({ surface: 'desktop', isInteractive: true, cwd: SHOP } as any)
+    await settle()
+    const pane = await $.ui.mount({ plugin: 'quiet-server', surface: 'desktop', ...PANE } as any)
+    expect(await pane.find({ type: 'Text', text: 'This conversation works on this branch' })).toBeDefined() // the tooltip of "here"
+    expect(await pane.find({ type: 'Text', text: 'Launch storybook' })).toBeDefined() // main's own Launch, open by default
+    await pane.press({ key: 'toggle:loose' }) // spike/x, folded at first
+    await pane.press({ key: 'worktree:spike/x' })
+    expect(filled.at(-1)).toContain('worktree for the branch spike/x')
+    await pane.press({ key: 'toggle:here' })
+    expect(await pane.find({ type: 'Text', text: 'Copy address' })).toBeDefined() // main's running dev still shows
     await pane.unmount()
   })
 

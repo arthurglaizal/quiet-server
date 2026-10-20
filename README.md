@@ -21,13 +21,14 @@ quiet-server  0/3 here  1 elsewhere
 **`/quiet-server`** opens or closes a pane in two sections, one under the other.
 
 - **This project**
-  - *The conversation's branch*: its servers that run, then what it can launch: the `package.json` scripts that serve (`dev`, `start`, `serve`, `preview`, `storybook`…, but not the ones that only control a server, like `dev:stop` or `dev:status`) and the entries of `.claude/launch.json`, the file the desktop app's previews already read.
-  - *Other branches*: servers started from another worktree of the same repository.
+  - *The conversation's branch*, tagged `here` (hover it for what it means): its servers that run, then what it can launch: the `package.json` scripts that serve (`dev`, `start`, `serve`, `preview`, `storybook`…, but not the ones that only control a server, like `dev:stop` or `dev:status`) and the entries of `.claude/launch.json`, the file the desktop app's previews already read.
+  - *Other branches*, one group each under a chevron: `main` first, with an anchor, then every other worktree of the repository, each with what runs and what it can launch. This branch, `main` and any branch where a server runs are open; the others stay folded, their head saying what they hold (`1 running · 3 to launch`). A fold you press is kept.
+  - *Branches with no worktree*: folded on one line, each with **Create worktree**. A server needs a folder checked out on its branch, so `main` without one shows the same button.
 - **Running elsewhere**: every other dev server on the machine, grouped by project, each group headed by its branch and the folder it sits in (`claude-mod-quiet-cost  ⑂ main  ~/…/2026 Claude mods`).
 
 Each server takes two lines: its name and what it is (`dev  Next.js app`), then what started it, how long it has been running, memory and CPU. What started it: `this pane`, `Claude, this conversation`, `Claude, another conversation`, the terminal app (`iTerm`, `Terminal`, `VS Code`…), or `detached` when what launched it is gone. A running server shows a small wave drifting slowly in a ring; one ready to launch, an empty dot. Its port sits on the right, in a thin outline while something listens on it.
 
-Everything else is grey. Orange only marks something to look at: a server forgotten for a day, or a port another server already holds.
+Everything else is grey. Orange only marks something to look at: a server forgotten for a day, or a port another server already holds (two branches running `dev` often want the same port).
 
 ## Install
 
@@ -49,6 +50,9 @@ Start a new session and the count appears in the status line. To update later: `
 | Port | `:3000` | `:3000` | On the desktop, a label (Copy address copies it); in the terminal, copies the URL |
 | Launch all | in the project's title line | same | Launches this branch's dev servers at once (not `start`, `serve` or `preview`, which serve a build); shown when there are two or more |
 | Stop all | in each section's title line | same | Stops every server of the section; press twice to confirm; shown when two or more run |
+| Fold | a branch's head | `▾` / `▸` | Opens or folds that branch's group |
+| Launch | on another branch's head | `▶ launch` | Launches that branch's dev servers, from its own worktree |
+| Create worktree | on a branch with no worktree | `create worktree` | Puts a request in the prompt box: ask Claude to create a worktree for that branch in `.claude/worktrees/` |
 | Add | plus, on the project's title line | `add` | Puts a request in the prompt box: ask Claude to add a server to `.claude/launch.json` |
 | Find | magnifier, next to it | `find` | Puts a request in the prompt box: ask Claude to look for servers the project could list |
 | Count | a window with its bottom strip, last on the project's title line | `hide count` / `show count` | Shows or hides the count in the status line, and the pane's button beside it |
@@ -71,7 +75,7 @@ A server launched from the pane lives as long as the Claude session: closing the
 ## What it runs and keeps
 
 - **No network requests.** Everything it reads is on your machine. Nothing leaves it except on your click: the address you copy goes to the clipboard, Open in browser hands it to your browser, and Add and Find put a request in the prompt box, which you send or not.
-- **Every 5 seconds**: `lsof` for the processes listening on TCP and their folder, `ps` for uptime, memory and CPU, and `git` for each folder's repository, worktree and branch.
+- **Every 5 seconds**: `lsof` for the processes listening on TCP and their folder, `ps` for uptime, memory and CPU, and `git` for each folder's repository, worktree and branch. Every 30 seconds, `git worktree list`, `git for-each-ref` and `git symbolic-ref` for the repository's other worktrees, its branches and its default branch, and each worktree's `package.json` and `.claude/launch.json`. It reads branches, it never switches one.
 - **Only on click**: your login shell (`$SHELL -lc`) to run the script you launch, as written in `package.json` or `.claude/launch.json`, so it finds `node` and `npm` as your terminal does; `kill` to stop a server and what it started; `open` to open its address in your browser.
 - **Hooks**:
   - `command.run`, only for `/quiet-server`: opens or closes the pane and answers the command itself. It never sees or changes any other command, its own or another plugin's, and never touches a permission.

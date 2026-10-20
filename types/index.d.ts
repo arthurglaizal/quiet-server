@@ -45,14 +45,20 @@ export type Project = {
   branch: string
 }
 
+// Another worktree of the conversation's repository: its branch, or none ("detached"), and what it can launch.
+export type Worktree = { top: string; branch: string; isDetached: boolean; launchables: Launchable[] }
+
 export type Snapshot = {
   project: Project
   launchables: Launchable[]
   servers: Server[]
+  worktrees?: Worktree[] // the repository's other worktrees
+  branches?: string[] // its local branches
+  trunk?: string // its default branch ("main"), or "" when none is found
 }
 
 declare module 'claude-code' {
   interface PluginState {
-    'quiet-server': { snapshot: Snapshot | null; isStatusHidden: boolean; busy: string[]; confirming: Section | null }
+    'quiet-server': { snapshot: Snapshot | null; isStatusHidden: boolean; busy: string[]; confirming: Section | null; opened: Record<string, boolean> }
   }
 }

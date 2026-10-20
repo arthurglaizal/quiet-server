@@ -2,13 +2,13 @@
 //   Port Menu, tied to the conversation. The status line keeps the count: this branch's servers that run out of all
 //   it runs or can launch, and what runs elsewhere. The pane, which /quiet-server opens, has two sections, one under
 //   the other. This project: what runs on the conversation's branch and what
-//   it can launch (package.json scripts, .claude/launch.json), then the same project's servers on its other branches
-//   (its other worktrees). Running elsewhere: every other dev server. Everything stays grey; a wave moves in what runs;
+//   it can launch (package.json scripts, .claude/launch.json), then the same project's other branches, one group each:
+//   main open, the others folded under a chevron, those without a worktree on one line. Running elsewhere: every other dev server. Everything stays grey; a wave moves in what runs;
 //   orange marks a server forgotten for a day, or a port another server already holds.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Launchable, Origin, Project, Section, Server, Snapshot } from '../types'
+import type { Launchable, Origin, Project, Section, Server, Snapshot, Worktree } from '../types'
 
 const PANE = 'servers'
 const TICK = 5000 // how often the ports are read again while the bar or the pane shows
@@ -31,16 +31,21 @@ const ASK = {
   find: 'Look through this project (package.json scripts, docker-compose, Makefile, READMEs, subfolders) for dev servers that .claude/launch.json does not list yet, and add the useful ones to it.',
 } as const
 const EMPTY = ['Nothing to run here yet.', 'Dev scripts from package.json and .claude/launch.json show up here.']
+const HERE_TIP = 'This conversation works on this branch'
+const MAX_TREES = 20 // the other worktrees read, at most
+const LOOSE_MAX = 12 // the branches without a worktree listed, at most
 
 // Held by the host, so the pane survives a hot reload of this file.
 const snapshot = atom({ plugin: 'quiet-server', key: 'snapshot' } as const, null as Snapshot | null)
 const isStatusHidden = atom({ plugin: 'quiet-server', key: 'isStatusHidden' } as const, false)
 const busy = atom({ plugin: 'quiet-server', key: 'busy' } as const, [] as string[]) // rows starting or stopping, by key
 const confirming = atom({ plugin: 'quiet-server', key: 'confirming' } as const, null as Section | null) // "Stop all" pressed once, there
+const opened = atom({ plugin: 'quiet-server', key: 'opened' } as const, {} as Record<string, boolean>) // a branch group folded or unfolded by hand, by repository and branch
 
 // The module's own: a reload starts them over, and ends the servers this session launched with their loops.
 const launched = new Map<string, AsyncGenerator<unknown, unknown>>() // by launchable id
 const gitCache = new Map<string, { at: number; info: GitInfo | null }>()
+const repoCache = new Map<string, { at: number; value: RepoBranches }>() // by the conversation's working tree
 const phases = new Map<string, number>() // each running row's place in its wave, so every wave moves in step
 let isRefreshing = false
 let shownStatus: string | undefined
@@ -53,6 +58,8 @@ export const register: Register = on => {
     await $.command.register({ name: 'quiet-server', description: 'Open the servers pane (/quiet-server status hides or shows the count)' }).catch(() => {}) // a name Claude Code already has is refused: start anyway
     const statusHidden = (await $.store.get('isStatusHidden').catch(() => undefined)) === true
     await update($, isStatusHidden, () => statusHidden)
+    const folds = await $.store.get('opened').catch(() => undefined)
+    if (folds && typeof folds === 'object') await update($, opened, () => folds as Record<string, boolean>)
     void refresh($).catch(() => {})
     $.clock.every(TICK, () => void tick($).catch(() => {}))
     return r
@@ -101,7 +108,24 @@ export const register: Register = on => {
     const surface = e.surface
     const actions = (row: Row) => rowActions($, s, row, surface)
     const copyPort = (row: Row) => () => void copy($, `http://localhost:${row.port}`, surface)
-    const branchLine = s.project.branch ? `${s.project.branch} · this conversation` : ''
+    // The branches, each a group under a chevron: this conversation's and main open, one where something runs too;
+    // the others folded. A fold pressed by hand is kept, for this repository.
+    const folds = await read($, opened)
+    const foldKey = (id: string) => `${s.project.repo}|${id}`
+    const isOpenAt = (id: string, fallback: boolean) => folds[foldKey(id)] ?? fallback
+    const fold = (id: string, isOpen: boolean) => () => void toggleOpen($, foldKey(id), isOpen).catch(() => {})
+    const launchList = (list: Launchable[]) => (isDemo ? demoPress($) : () => void startList($, list))
+    const hereOpen = !s.project.branch || isOpenAt('@here', true)
+    const hereHead: Head | undefined = s.project.branch ? { key: 'here', name: s.project.branch, icon: s.project.branch === s.trunk ? 'anchor' : 'branch', isOpen: hereOpen, isHere: true, toggle: fold('@here', hereOpen) } : undefined
+    const groupOpen = (g: BranchGroup) => isOpenAt(g.id, g.isTrunk || g.rows.some(r => r.server !== undefined))
+    const headOf = (g: BranchGroup): Head => {
+      const isOpen = groupOpen(g)
+      const batch = g.top ? launchBatch(g.rows) : []
+      return { key: g.key, name: g.branch, icon: g.isDetached ? 'commit' : g.isTrunk ? 'anchor' : 'branch', isOpen, summary: summaryOf(g), isSpaced: true, launch: batch.length ? { names: batch.map(l => l.name), press: launchList(batch) } : undefined, toggle: fold(g.id, isOpen) }
+    }
+    const looseOpen = isOpenAt('@loose', false)
+    const looseHead: Head = { key: 'loose', name: `${v.loose.length} more branch${v.loose.length === 1 ? '' : 'es'}`, icon: 'branch', isOpen: looseOpen, summary: 'no worktree', isSpaced: true, toggle: fold('@loose', looseOpen) }
+    const makeTree = (branch: string) => (isDemo ? demoPress($) : () => void askWorktree($, branch))
     // The two that ask Claude: add a server, or look for ones to add. Both fill the prompt; the person sends it.
     const asks = [
       { key: 'ask-add', icon: 'add' as const, tip: 'Ask Claude to add a server', label: 'add', press: () => void ask($, 'add') },
@@ -121,8 +145,8 @@ export const register: Register = on => {
       keepPhases(v, await $.clock.now())
       // A tip under its button, ending at the button's right edge, on a card of its own as quiet-model's pane draws
       // them (the app draws none in a pane). The tree is turned over at the end so a tip covers the rows below.
-      const tip = (text: string) => (
-        <Box position="absolute" top={1} right={0} width={text.length + 4} display="none" hover={{ display: 'flex' }} backgroundColor={TIP.card} borderStyle="round" borderColor={TIP.border} paddingX={1}>
+      const tip = (text: string, side: 'left' | 'right' = 'right') => (
+        <Box position="absolute" top={1} {...(side === 'left' ? { left: 0 } : { right: 0 })} width={text.length + 4} display="none" hover={{ display: 'flex' }} backgroundColor={TIP.card} borderStyle="round" borderColor={TIP.border} paddingX={1}>
           <Text color={TIP.name}>{text}</Text>
         </Box>
       )
@@ -197,15 +221,67 @@ export const register: Register = on => {
           </Box>
         )
       }
+      // A branch's head: the chevron, its glyph, its name, then "here" or what it holds. The whole head folds the
+      // group; "here" explains itself on hover; a group with servers to launch has its own Launch.
+      const branchHeader = (br: Head) => {
+        const drawing = branchHeadSvg(br, drawn - (br.launch ? 100 : 0))
+        const cells = Math.ceil(drawing.width / PX_PER_COLUMN)
+        return (
+          <Box key={`${br.key}-head`} flexDirection="row" alignItems="center">
+            <Box flexShrink={1}>
+              <Svg source={drawing.svg} alt={[br.name, br.isHere ? 'this conversation' : br.summary, br.isOpen ? 'open' : 'folded'].filter(Boolean).join(', ')} />
+              <Box position="absolute" top={0} left={0} width={cells} height={1}>
+                <Button key={`toggle:${br.key}`} plain onPress={br.toggle}>
+                  {press(cells)}
+                </Button>
+              </Box>
+              {drawing.tag && (
+                <Box position="absolute" top={0} left={Math.floor(drawing.tag.x / PX_PER_COLUMN)} width={Math.ceil(drawing.tag.width / PX_PER_COLUMN)} height={1}>
+                  {tip(HERE_TIP, 'left')}
+                </Box>
+              )}
+            </Box>
+            <Box flexGrow={1} />
+            {br.launch && wordButton({ key: `group-launch:${br.key}`, label: 'Launch', tip: `Launch ${br.launch.names.join(', ')}`, glyph: 'start', press: br.launch.press })}
+          </Box>
+        )
+      }
+      const worktreeButton = (branch: string) => wordButton({ key: `worktree:${branch}`, label: 'Create worktree', tip: `Ask Claude to create a worktree for ${branch}`, press: makeTree(branch) })
+      const note = (key: string, text: string, branch?: string) => (
+        <Box key={key} flexDirection="row" alignItems="center">
+          <Svg source={captionSvg(text, textWidth, false, IND_W)} alt={text} />
+          <Box flexGrow={1} />
+          {branch !== undefined && worktreeButton(branch)}
+        </Box>
+      )
+      const groupBody = (g: BranchGroup) =>
+        !g.top ? [note(`${g.key}:none`, 'No folder for this branch yet', g.branch)] : g.rows.length === 0 ? [note(`${g.key}:empty`, 'Nothing to launch on this branch')] : g.rows.map(rowView)
       return overTheNext(
         <Box flexDirection="column" paddingX={1}>
-          {header('This project', s.project.name, bulk.project, extras)}
-          {branchLine && <Svg source={branchSvg(s.project.branch, drawn)} alt={branchLine} />}
-          {v.here.length === 0 && <Svg source={emptySvg(EMPTY, drawn, POTTED_CACTUS)} alt={EMPTY.join(' ')} />}
-          {v.here.map(rowView)}
-          {v.other.length > 0 && <Box height={1} />}
-          {v.other.length > 0 && <Svg source={captionSvg('Other branches', drawn, true)} alt="Other branches" />}
-          {v.other.map(rowView)}
+          {header('This project', '', bulk.project, extras)}
+          <Svg source={projectSvg(s.project.name, drawn)} alt={s.project.name} />
+          {hereHead && branchHeader(hereHead)}
+          {hereOpen && v.here.length === 0 && <Svg source={emptySvg(EMPTY, drawn, POTTED_CACTUS)} alt={EMPTY.join(' ')} />}
+          {hereOpen && v.here.map(rowView)}
+          {v.branches.map(g => (
+            <Box key={g.key} flexDirection="column">
+              {branchHeader(headOf(g))}
+              {groupOpen(g) && groupBody(g)}
+            </Box>
+          ))}
+          {v.loose.length > 0 && (
+            <Box key="loose" flexDirection="column">
+              {branchHeader(looseHead)}
+              {looseOpen && v.loose.slice(0, LOOSE_MAX).map(b => (
+                <Box key={`loose:${b}`} flexDirection="row" alignItems="center">
+                  <Svg source={captionSvg(b, textWidth, true, IND_W)} alt={b} />
+                  <Box flexGrow={1} />
+                  {worktreeButton(b)}
+                </Box>
+              ))}
+              {looseOpen && v.loose.length > LOOSE_MAX && note('loose:more', `and ${v.loose.length - LOOSE_MAX} more`)}
+            </Box>
+          )}
           <Svg source={ruleSvg(drawn)} alt="Divider" />
           {header('Running elsewhere', elsewhereCount, bulk.elsewhere)}
           {v.elsewhere.length === 0 && <Svg source={emptySvg(['Nothing else is running.'], drawn, NIGHT)} alt="Nothing else is running." />}
@@ -303,18 +379,62 @@ export const register: Register = on => {
         </Box>
       )
     }
-    return (
-      <Box flexDirection="column" paddingX={1}>
-        {termHeader('This project', s.project.name, bulk.project, true)}
-        {branchLine && <Text dimColor wrap="truncate-end">{branchLine}</Text>}
-        {v.here.length === 0 && EMPTY.map(t => <Text key={`empty:${t}`} dimColor>{t}</Text>)}
-        {v.here.map(termRow)}
-        {v.other.length > 0 && (
-          <Box marginTop={1}>
-            <Text dimColor>Other branches</Text>
+    // A branch's head: a chevron to press, its name, and what it holds or "this conversation".
+    const termHead = (br: Head) => (
+      <Box key={`${br.key}-head`} flexDirection="row" marginTop={br.isSpaced ? 1 : 0}>
+        <Button key={`toggle:${br.key}`} plain dimColor onPress={br.toggle}>
+          {br.isOpen ? '▾' : '▸'}
+        </Button>
+        <Box marginLeft={1} flexShrink={1}>
+          <Text dimColor={!br.isHere} wrap="truncate-end">
+            {br.isHere ? `${br.name} · this conversation` : br.name}
+          </Text>
+        </Box>
+        {!br.isHere && br.summary && <Text dimColor wrap="truncate-end">{` · ${br.summary}`}</Text>}
+        <Box flexGrow={1} />
+        {br.launch && (
+          <Box marginLeft={2}>
+            <Button key={`group-launch:${br.key}`} plain dimColor onPress={br.launch.press}>
+              {`${GLYPH.start} launch`}
+            </Button>
           </Box>
         )}
-        {v.other.map(termRow)}
+      </Box>
+    )
+    const termNote = (key: string, text: string, branch?: string) => (
+      <Box key={key} flexDirection="row">
+        <Box width={2} flexShrink={0} />
+        <Text dimColor wrap="truncate-end">{text}</Text>
+        <Box flexGrow={1} />
+        {branch !== undefined && (
+          <Button key={`worktree:${branch}`} plain dimColor onPress={makeTree(branch)}>
+            create worktree
+          </Button>
+        )}
+      </Box>
+    )
+    const termBody = (g: BranchGroup) =>
+      !g.top ? [termNote(`${g.key}:none`, 'No folder for this branch yet', g.branch)] : g.rows.length === 0 ? [termNote(`${g.key}:empty`, 'Nothing to launch on this branch')] : g.rows.map(termRow)
+    return (
+      <Box flexDirection="column" paddingX={1}>
+        {termHeader('This project', '', bulk.project, true)}
+        <Text dimColor wrap="truncate-end">{s.project.name}</Text>
+        {hereHead && termHead(hereHead)}
+        {hereOpen && v.here.length === 0 && EMPTY.map(t => <Text key={`empty:${t}`} dimColor>{t}</Text>)}
+        {hereOpen && v.here.map(termRow)}
+        {v.branches.map(g => (
+          <Box key={g.key} flexDirection="column">
+            {termHead(headOf(g))}
+            {groupOpen(g) && termBody(g)}
+          </Box>
+        ))}
+        {v.loose.length > 0 && (
+          <Box key="loose" flexDirection="column">
+            {termHead(looseHead)}
+            {looseOpen && v.loose.slice(0, LOOSE_MAX).map(b => termNote(`loose:${b}`, b, b))}
+            {looseOpen && v.loose.length > LOOSE_MAX && termNote('loose:more', `and ${v.loose.length - LOOSE_MAX} more`)}
+          </Box>
+        )}
         <Box marginTop={1} marginBottom={1}>
           <Text dimColor>{'─'.repeat(inner)}</Text>
         </Box>
@@ -374,6 +494,19 @@ function realActions($: EngineInterface, s: Snapshot, row: Row, surface: string)
 
 type Bulk = { key: string; label: string; tip: string; glyph?: 'start' | 'stop'; isWarm?: boolean; press: () => void }
 
+// A branch group's head, as both surfaces draw it.
+export type Head = {
+  key: string
+  name: string
+  icon: 'branch' | 'anchor' | 'commit' // a branch; main, the anchor; a worktree on no branch
+  isOpen: boolean
+  isHere?: boolean // the conversation's branch: tagged "here"
+  summary?: string // "1 running · 3 to launch"
+  isSpaced?: boolean
+  launch?: { names: string[]; press: () => void }
+  toggle: () => void
+}
+
 // "Launch all" over this branch's dev servers, "Stop all" over a section's servers: only when there are two or more.
 function bulkActions($: EngineInterface, v: Sections, asking: Section | null): Record<Section, Bulk[]> {
   const batch = launchBatch(v.here)
@@ -391,13 +524,15 @@ function bulkActions($: EngineInterface, v: Sections, asking: Section | null): R
 }
 
 // Made-up servers, as a project with worktrees and a busy machine would show: this branch running one of three,
-// launched from the pane, another worktree on main, and four elsewhere in three projects, started from a terminal,
+// launched from the pane, a worktree on main running one of two, another on a fix with two to launch, two branches
+// with no worktree, and four elsewhere in three projects, started from a terminal,
 // another conversation, or left detached and forgotten for days.
 export function demoSnapshot(): Snapshot {
   const home = '/Users/me/code'
   const top = `${home}/atelier-web`
   const repo = `${top}/.git`
-  const launchable = (name: string, command: string, port: number): Launchable => ({ id: `${top}#${name}`, name, script: name, command, run: `npm run ${name}`, cwd: top, source: 'package.json', port, description: describe(command) })
+  const launchableAt = (dir: string, name: string, command: string, port: number): Launchable => ({ id: `${dir}#${name}`, name, script: name, command, run: `npm run ${name}`, cwd: dir, source: 'package.json', port, description: describe(command) })
+  const launchable = (name: string, command: string, port: number) => launchableAt(top, name, command, port)
   const server = (pid: number, name: string, command: string, ports: number[], cwd: string, git: { top: string; repo: string; name: string; branch: string } | null, minutes: number, mb: number, cpu: number, origin: Origin): Server => ({
     pid,
     pids: [pid],
@@ -415,9 +550,16 @@ export function demoSnapshot(): Snapshot {
     origin,
   })
   const mainTree = `${home}/atelier-web-main`
+  const cartTree = `${home}/atelier-web-cart`
   return {
     project: { cwd: top, top, repo, name: 'atelier-web', branch: 'feat/checkout' },
     launchables: [launchable('dev', 'next dev -p 3001', 3001), launchable('storybook', 'storybook dev -p 6006', 6006), launchable('preview', 'next start -p 4173', 4173)],
+    worktrees: [
+      { top: mainTree, branch: 'main', isDetached: false, launchables: [launchableAt(mainTree, 'dev', 'next dev', 3000), launchableAt(mainTree, 'storybook', 'storybook dev -p 6008', 6008)] },
+      { top: cartTree, branch: 'fix/cart-total', isDetached: false, launchables: [launchableAt(cartTree, 'dev', 'next dev -p 3002', 3002), launchableAt(cartTree, 'storybook', 'storybook dev -p 6009', 6009)] },
+    ],
+    branches: ['design/tokens', 'feat/checkout', 'fix/cart-total', 'main', 'spike/edge-cache'],
+    trunk: 'main',
     servers: [
       server(90001, 'dev', 'npm run dev\nnode .bin/next dev -p 3001', [3001], top, { top, repo, name: 'atelier-web', branch: 'feat/checkout' }, 12, 310, 3, { kind: 'pane' }),
       server(90002, 'dev', 'npm run dev\nnode .bin/next dev', [3000], mainTree, { top: mainTree, repo, name: 'atelier-web', branch: 'main' }, 130, 280, 1, { kind: 'terminal', app: 'iTerm' }),
@@ -463,34 +605,71 @@ export type Row = {
   launchable?: Launchable
 }
 
-export type Sections = { here: Row[]; other: Row[]; elsewhere: Row[] }
+// Another branch of the project: a worktree with its rows, or main with no worktree yet (no `top`).
+export type BranchGroup = { key: string; id: string; branch: string; top?: string; isTrunk: boolean; isDetached: boolean; rows: Row[] }
 
-// This branch: what runs, then what it can launch. Other branches: the same project's other worktrees. Elsewhere:
-// every other server, by project and port.
+// `other`: every branch group's rows, for "Stop all" and the waves. `loose`: the branches with no worktree.
+export type Sections = { here: Row[]; branches: BranchGroup[]; loose: string[]; other: Row[]; elsewhere: Row[] }
+
+// This branch: what runs, then what it can launch. Other branches: the same project's other worktrees, main first,
+// each with what runs and what it can launch, then the branches with no worktree. Elsewhere: every other server,
+// by project and port.
 export function sections(s: Snapshot, pending: string[] = []): Sections {
   const { project, launchables, servers } = s
   const byPort = (a: Server, b: Server) => (a.ports[0] ?? 0) - (b.ports[0] ?? 0)
   // Without git, the tree is the folder itself: a server run from a subfolder of it is still this project's.
   const hasGit = (x: { top: string; repo: string }) => x.repo !== x.top
   const isMine = (x: Server) => x.top === project.top || (!hasGit(x) && !hasGit(project) && (x.cwd === project.top || x.cwd.startsWith(`${project.top}/`)))
-  const mine = servers.filter(isMine).sort(byPort)
-  // A server claims one launchable: the one it carries the name, script or port of, else the one whose command
-  // runs the same program ("next" for `next dev`). Each launchable is claimed once: `next dev` leaves `start` ready.
+  const here = treeRows(launchables, servers.filter(isMine).sort(byPort), project, servers, pending, 'here')
+  // The other worktrees git lists, and any a server runs from that it did not.
+  const theirs = servers.filter(x => x.repo === project.repo && !isMine(x)).sort(byPort)
+  const trees = new Map<string, Worktree>()
+  for (const w of s.worktrees ?? []) if (w.top !== project.top) trees.set(w.top, w)
+  for (const sv of theirs) if (!trees.has(sv.top)) trees.set(sv.top, { top: sv.top, branch: sv.branch, isDetached: sv.branch === 'detached', launchables: [] })
+  const trunk = s.trunk ?? ''
+  const branches: BranchGroup[] = [...trees.values()].map(w => ({
+    key: `branch:${w.top}`,
+    id: w.isDetached ? w.top : w.branch,
+    branch: w.isDetached ? basename(w.top) : w.branch,
+    top: w.top,
+    isTrunk: !w.isDetached && w.branch === trunk && trunk !== '',
+    isDetached: w.isDetached,
+    rows: treeRows(w.launchables, theirs.filter(x => x.top === w.top), w, servers, pending, 'other'),
+  }))
+  const checkedOut = new Set([project.branch, ...[...trees.values()].map(w => w.branch)])
+  if (trunk && !checkedOut.has(trunk)) branches.push({ key: 'branch:trunk', id: trunk, branch: trunk, isTrunk: true, isDetached: false, rows: [] })
+  branches.sort((a, b) => Number(b.isTrunk) - Number(a.isTrunk) || Number(a.isDetached) - Number(b.isDetached) || a.branch.localeCompare(b.branch))
+  const elsewhere = servers.filter(x => x.repo !== project.repo && !isMine(x)).sort((a, b) => a.projectName.localeCompare(b.projectName) || byPort(a, b))
+  return {
+    here,
+    branches,
+    loose: (s.branches ?? []).filter(b => !checkedOut.has(b) && b !== trunk),
+    other: branches.flatMap(g => g.rows),
+    elsewhere: elsewhere.map(sv => serverRow(sv, 'elsewhere', undefined, pending)),
+  }
+}
+
+// A working tree's rows: what runs from it, then what it can launch. A server claims one launchable: the one it
+// carries the name, script or port of, else the one whose command runs the same program ("next" for `next dev`).
+// Each launchable is claimed once: `next dev` leaves `start` ready.
+function treeRows(launchables: Launchable[], svs: Server[], place: { top: string; branch: string }, servers: Server[], pending: string[], section: Row['section']): Row[] {
   const claimed = new Set<string>()
   const claim = (sv: Server) => {
     const l = launchables.find(l => !claimed.has(l.id) && matches(l, sv)) ?? launchables.find(l => !claimed.has(l.id) && binaryName(l.command) === sv.name)
     if (l) claimed.add(l.id)
     return l
   }
-  const running = mine.map(sv => serverRow(sv, 'here', claim(sv), pending))
-  const ready = launchables.filter(l => !claimed.has(l.id)).map(l => readyRow(l, project, servers, pending))
-  const other = servers.filter(x => x.repo === project.repo && !isMine(x)).sort(byPort)
-  const elsewhere = servers.filter(x => x.repo !== project.repo && !isMine(x)).sort((a, b) => a.projectName.localeCompare(b.projectName) || byPort(a, b))
-  return {
-    here: [...running, ...ready],
-    other: other.map(sv => serverRow(sv, 'other', undefined, pending)),
-    elsewhere: elsewhere.map(sv => serverRow(sv, 'elsewhere', undefined, pending)),
-  }
+  const running = svs.map(sv => serverRow(sv, section, claim(sv), pending))
+  return [...running, ...launchables.filter(l => !claimed.has(l.id)).map(l => readyRow(l, place, servers, pending, section))]
+}
+
+// What a folded group's head says it holds: "1 running · 3 to launch", "no worktree".
+export function summaryOf(g: BranchGroup) {
+  if (!g.top) return 'no worktree'
+  const running = g.rows.filter(r => r.server).length
+  const ready = g.rows.length - running
+  const parts = [...(g.isDetached ? ['detached'] : []), ...(running ? [`${running} running`] : []), ...(ready ? [`${ready} to launch`] : [])]
+  return parts.join(' · ') || 'nothing to launch'
 }
 
 // The count, one line of text in the status line: "0/0 here", what runs on this branch against all it runs or could
@@ -505,8 +684,8 @@ export function matches(l: Launchable, sv: Server) {
   return sv.name === l.name || (l.script !== undefined && sv.name === l.script) || (l.port !== undefined && sv.ports.includes(l.port))
 }
 
-// A server goes by its script ("dev", then "Next.js app"); its second line starts with what started it. Elsewhere,
-// its project and branch head its group, so the line does not repeat the branch.
+// A server goes by its script ("dev", then "Next.js app"); its second line starts with what started it. Its branch,
+// or its project and branch elsewhere, head its group: the line does not repeat them.
 function serverRow(sv: Server, section: Row['section'], l: Launchable | undefined, pending: string[]): Row {
   const key = `pid:${sv.pid}`
   const isStopping = pending.includes(key)
@@ -522,25 +701,25 @@ function serverRow(sv: Server, section: Row['section'], l: Launchable | undefine
     port: sv.ports[0],
     meta: isStopping
       ? [{ text: 'Stopping…' }]
-      : [...(origin ? [{ text: origin }] : []), ...(section !== 'other' || !sv.branch ? [] : [{ text: sv.branch }]), { text: duration(sv.uptimeMs), isWarm: isForgotten }, { text: memory(sv.rssKb) }, { text: `${Math.round(sv.cpu)}% CPU` }],
+      : [...(origin ? [{ text: origin }] : []), { text: duration(sv.uptimeMs), isWarm: isForgotten }, { text: memory(sv.rssKb) }, { text: `${Math.round(sv.cpu)}% CPU` }],
     isForgotten,
     server: sv,
     launchable: l,
   }
 }
 
-function readyRow(l: Launchable, project: Project, servers: Server[], pending: string[]): Row {
+function readyRow(l: Launchable, place: { top: string; branch: string }, servers: Server[], pending: string[], section: Row['section'] = 'here'): Row {
   const key = `launch:${l.id}`
   const isStarting = pending.includes(key)
   const holder = l.port === undefined ? undefined : servers.find(sv => sv.ports.includes(l.port!))
-  const note = holder ? `used by ${holder.top === project.top ? holder.name : holder.branch || holder.projectName}` : undefined
+  const note = holder ? `used by ${holder.top === place.top ? holder.name : holder.branch || holder.projectName}` : undefined
   return {
     key,
-    section: 'here',
+    section,
     state: isStarting ? 'starting' : 'ready',
     name: l.name,
     description: l.description,
-    branch: project.branch,
+    branch: place.branch,
     port: l.port,
     meta: isStarting ? [{ text: 'Starting…' }] : [...(note ? [{ text: `port ${l.port} ${note}`, isWarm: true }] : []), { text: l.run }],
     isForgotten: false,
@@ -591,11 +770,12 @@ async function refresh($: EngineInterface) {
     const now = await $.clock.now()
     const home = (await $.env.get('HOME').catch(() => undefined)) ?? ''
     const project = await projectOf($, await $.session.cwd(), now)
-    const [launchables, servers] = await Promise.all([findLaunchables($, project), scanServers($, home, now)])
-    const fresh: Snapshot = { project, launchables, servers }
+    const [launchables, servers, repo] = await Promise.all([findLaunchables($, project), scanServers($, home, now), repoBranches($, project, now)])
+    const fresh: Snapshot = { project, launchables, servers, ...repo }
     await update($, snapshot, () => fresh)
     // A launch is done once its server listens, a stop once its process is gone.
-    const runningKeys = new Set(sections(fresh).here.filter(r => r.launchable && r.server).map(r => `launch:${r.launchable!.id}`))
+    const v = sections(fresh)
+    const runningKeys = new Set([...v.here, ...v.other].filter(r => r.launchable && r.server).map(r => `launch:${r.launchable!.id}`))
     const pids = new Set(servers.map(sv => `pid:${sv.pid}`))
     await update($, busy, list => list.filter(k => (k.startsWith('launch:') ? !runningKeys.has(k) : pids.has(k))))
     await showStatus($)
@@ -651,6 +831,29 @@ async function gitInfo($: EngineInterface, dir: string, now: number, isFresh = f
 async function projectOf($: EngineInterface, cwd: string, now: number): Promise<Project> {
   const git = await gitInfo($, cwd, now, true)
   return git ? { cwd, ...git } : { cwd, top: cwd, repo: cwd, name: basename(cwd), branch: '' }
+}
+
+type RepoBranches = { worktrees: Worktree[]; branches: string[]; trunk: string }
+
+// The repository's other worktrees with what each can launch, its local branches, and its default branch: what
+// origin's HEAD names, else main, else master. Read again after GIT_TTL.
+async function repoBranches($: EngineInterface, p: Project, now: number): Promise<RepoBranches> {
+  if (p.repo === p.top) return { worktrees: [], branches: [], trunk: '' }
+  const kept = repoCache.get(p.top)
+  if (kept && now - kept.at < GIT_TTL) return kept.value
+  const [list, refs, head] = await Promise.all([
+    run($, [BIN.git, '-C', p.top, 'worktree', 'list', '--porcelain']),
+    run($, [BIN.git, '-C', p.top, 'for-each-ref', '--format=%(refname:short)', 'refs/heads']),
+    run($, [BIN.git, '-C', p.top, 'symbolic-ref', '--short', '-q', 'refs/remotes/origin/HEAD']),
+  ])
+  const branches = refs.exitCode === 0 ? refs.stdout.split('\n').map(b => b.trim()).filter(Boolean) : []
+  const worktrees: Worktree[] = []
+  for (const w of parseWorktrees(list.exitCode === 0 ? list.stdout : '').filter(w => w.top !== p.top).slice(0, MAX_TREES)) {
+    worktrees.push({ ...w, launchables: await findLaunchables($, { cwd: w.top, top: w.top, repo: p.repo, name: p.name, branch: w.branch }) })
+  }
+  const value = { worktrees, branches, trunk: trunkOf(branches, head.exitCode === 0 ? head.stdout.trim() : '') }
+  repoCache.set(p.top, { at: now, value })
+  return value
 }
 
 async function readJson($: EngineInterface, path: string): Promise<any> {
@@ -762,7 +965,8 @@ async function start($: EngineInterface, l: Launchable) {
 // Asks the server and everything it runs to stop, then forces whatever is still there after 3 s.
 async function stop($: EngineInterface, s: Snapshot, sv: Server) {
   await mark($, `pid:${sv.pid}`, true)
-  const own = s.launchables.find(l => sv.top === s.project.top && matches(l, sv) && launched.has(l.id))
+  const all = [...s.launchables, ...(s.worktrees ?? []).flatMap(w => w.launchables)]
+  const own = all.find(l => (l.cwd === sv.top || l.cwd.startsWith(`${sv.top}/`)) && matches(l, sv) && launched.has(l.id))
   if (own) void launched.get(own.id)!.return(undefined) // one this session launched: ending its loop ends it
   const pids = sv.pids.filter(p => p > 1).map(String)
   await run($, [BIN.kill, '-TERM', ...pids])
@@ -779,6 +983,23 @@ async function stop($: EngineInterface, s: Snapshot, sv: Server) {
 async function ask($: EngineInterface, what: keyof typeof ASK) {
   const done = await $.prompt.fill({ text: ASK[what], mode: 'replace' }).catch(() => undefined)
   void $.ui.toast(done?.isFilled ? 'Prompt filled: complete it and send' : 'Could not fill the prompt')
+}
+
+// "Create worktree": a request in the prompt box, for the person to send. Claude creates the folder; the pane lists it.
+async function askWorktree($: EngineInterface, branch: string) {
+  const text = `Create a git worktree for the branch ${branch} in .claude/worktrees/, and install its dependencies if it needs any, so its dev servers can run beside this one.`
+  const done = await $.prompt.fill({ text, mode: 'replace' }).catch(() => undefined)
+  void $.ui.toast(done?.isFilled ? 'Prompt filled: send it to create the worktree' : 'Could not fill the prompt')
+}
+
+// A branch group folded or unfolded by hand: kept across sessions.
+async function toggleOpen($: EngineInterface, key: string, wasOpen: boolean) {
+  const folds = await update($, opened, o => ({ ...o, [key]: !wasOpen }))
+  await $.store.set('opened', folds).catch(() => {})
+}
+
+async function startList($: EngineInterface, list: Launchable[]) {
+  for (const l of list) await start($, l)
 }
 
 // Opens the pane, or closes it when it is up: the command and the bar's button.
@@ -826,6 +1047,27 @@ async function pressStopAll($: EngineInterface, section: Section) {
 // ——— Reading command output (pure, tested) ———
 
 export type Proc = { pid: number; ppid: number; elapsedMs: number; rssKb: number; cpu: number; command: string }
+
+// `git worktree list --porcelain`: a block per worktree, its path, then its branch or "detached". A bare repository
+// and a worktree whose folder is gone ("prunable") are left out.
+export function parseWorktrees(out: string): Omit<Worktree, 'launchables'>[] {
+  const list: Omit<Worktree, 'launchables'>[] = []
+  for (const block of out.split(/\n\s*\n/)) {
+    const lines = block.split('\n')
+    const top = lines.find(l => l.startsWith('worktree '))?.slice(9)
+    if (!top || lines.some(l => l === 'bare' || l.startsWith('prunable'))) continue
+    const ref = lines.find(l => l.startsWith('branch '))?.slice(7)
+    list.push({ top, branch: ref ? ref.replace(/^refs\/heads\//, '') : 'detached', isDetached: !ref })
+  }
+  return list
+}
+
+// The default branch: the one origin's HEAD names ("origin/main"), else main, else master, else none.
+export function trunkOf(branches: string[], originHead: string) {
+  const named = originHead.replace(/^origin\//, '')
+  if (named) return named
+  return ['main', 'master'].find(b => branches.includes(b)) ?? ''
+}
 
 // `lsof -Fpcn`: a "p" line per process, then its command ("c") and its addresses ("n", "*:3000").
 export function parseListeners(out: string) {
@@ -1279,16 +1521,57 @@ export function wordSvg(label: string, width: number, glyph?: 'start' | 'stop', 
   return `${svgOpen(width, HEAD_H)}${icon}<text x="${glyph ? 15 : 0}" y="${HEAD_BASE}" fill="${color}" font-size="${SMALL}"${isWarm ? ' font-weight="600"' : ''}>${esc(label)}</text></svg>`
 }
 
-// The conversation's branch, over its servers.
-export function branchSvg(branch: string, width: number) {
-  const name = fit(branch, Math.max(60, width - 150), SMALL_WIDTH)
-  return `${svgOpen(width, CAPTION_H)}${branchGlyph(0, CAPTION_BASE - 10, 12)}<text x="18" y="${CAPTION_BASE}" font-size="${SMALL}" xml:space="preserve"><tspan fill="${SOFT}">${esc(name)}</tspan><tspan fill="${TEXT}"> · this conversation</tspan></text></svg>`
+// Stroked icons on a 24 grid (Tabler's, MIT): the chevrons, main's anchor, a worktree on no branch, and the pin.
+const ICONS = {
+  open: 'M6 9l6 6l6 -6',
+  folded: 'M9 6l6 6l-6 6',
+  anchor: 'M12 9v12M4 13a8 8 0 0 0 16 0M21 13h-2M5 13H3M9 6a3 3 0 1 0 6 0a3 3 0 1 0 -6 0',
+  commit: 'M9 12a3 3 0 1 0 6 0a3 3 0 1 0 -6 0M12 3v6M12 15v6',
+  pin: 'M9 11a3 3 0 1 0 6 0a3 3 0 0 0 -6 0M17.657 16.657l-4.243 4.243a2 2 0 0 1 -2.827 0l-4.244 -4.243a8 8 0 1 1 11.314 0z',
+} as const
+const strokeIcon = (d: string, x: number, y: number, size: number, color: string, width = 2) =>
+  `<g transform="translate(${x} ${y}) scale(${size / 24})" fill="none" stroke="${color}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></g>`
+const HERE_GROUND = '#262629' // the "here" tag
+
+// A branch group's head: a chevron, the branch glyph (main's anchor, a commit for a worktree on no branch), the
+// name, then the "here" tag, a pin lit inside it, or what the group holds. As wide as what it draws, so the empty
+// button over it folds the group from anywhere on it; `tag` says where "here" sits, for its tooltip.
+export function branchHeadSvg(br: Pick<Head, 'name' | 'icon' | 'isOpen' | 'isHere' | 'summary' | 'isSpaced'>, maxWidth: number) {
+  const top = br.isSpaced ? 8 : 0
+  const base = top + CAPTION_BASE
+  const parts = [strokeIcon(br.isOpen ? ICONS.open : ICONS.folded, 0, base - 10, 12, OFF, 2.4)]
+  parts.push(br.icon === 'branch' ? branchGlyph(16, base - 10, 12) : strokeIcon(ICONS[br.icon], 16, base - 10, 12, TEXT))
+  const x = 34
+  const name = fit(br.name, Math.max(60, maxWidth - x - 140), SMALL_WIDTH)
+  parts.push(`<text x="${x}" y="${base}" fill="${br.isHere ? BRIGHT : SOFT}" font-size="${SMALL}" xml:space="preserve">${esc(name)}</text>`)
+  let end = x + name.length * SMALL_WIDTH
+  let tag: { x: number; width: number } | undefined
+  if (br.isHere) {
+    tag = { x: end + 8, width: 52 }
+    parts.push(
+      `<rect x="${tag.x}" y="${base - 12}" width="${tag.width}" height="16" rx="4" fill="${HERE_GROUND}"/>`,
+      strokeIcon(ICONS.pin, tag.x + 6, base - 9.5, 11, BRIGHT),
+      `<text x="${tag.x + 21}" y="${base}" fill="${TEXT}" font-size="11">here</text>`,
+    )
+    end = tag.x + tag.width
+  } else if (br.summary) {
+    const rest = fit(` · ${br.summary}`, maxWidth - end - 4, SMALL_WIDTH)
+    parts.push(`<text x="${end}" y="${base}" fill="${TEXT}" font-size="${SMALL}" xml:space="preserve">${esc(rest)}</text>`)
+    end += rest.length * SMALL_WIDTH
+  }
+  const width = Math.ceil(Math.min(maxWidth, end + 4))
+  return { svg: `${svgOpen(width, top + CAPTION_H)}${parts.join('')}</svg>`, width, tag }
 }
 
-// A caption ("Other branches", with the branch glyph) or a line of help, in secondary text.
-export function captionSvg(caption: string, width: number, withBranch = false) {
-  const x = withBranch ? 18 : 0
-  return `${svgOpen(width, CAPTION_H)}${withBranch ? branchGlyph(0, CAPTION_BASE - 10, 12) : ''}<text x="${x}" y="${CAPTION_BASE}" fill="${TEXT}" font-size="${SMALL}" xml:space="preserve">${esc(fit(caption, width - x, SMALL_WIDTH))}</text></svg>`
+// The project's name, under "This project": the brighter grey, at the small size, a little room below it.
+export function projectSvg(name: string, width: number) {
+  return `${svgOpen(width, CAPTION_H)}<text x="0" y="${CAPTION_BASE - 4}" fill="${SOFT}" font-size="${SMALL}" xml:space="preserve">${esc(fit(name, width, SMALL_WIDTH))}</text></svg>`
+}
+
+// A caption or a line of help in secondary text, from `indent` px; with the branch glyph, a branch with no worktree.
+export function captionSvg(caption: string, width: number, withBranch = false, indent = 0) {
+  const x = indent + (withBranch ? 18 : 0)
+  return `${svgOpen(width, CAPTION_H)}${withBranch ? branchGlyph(indent, CAPTION_BASE - 10, 12) : ''}<text x="${x}" y="${CAPTION_BASE}" fill="${TEXT}" font-size="${SMALL}" xml:space="preserve">${esc(fit(caption, width - x, SMALL_WIDTH))}</text></svg>`
 }
 
 // A group's head, running elsewhere, in the style of the conversation's branch line: the project in the brighter
