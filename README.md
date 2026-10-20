@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://github.com/arthurglaizal/quiet-server/releases/download/v0.1.0/quiet-server.gif" alt="Quiet Server demo: the count in the status line, then the pane that launches this branch's servers and lists what runs elsewhere" width="100%">
+  <img src="https://github.com/arthurglaizal/quiet-server/releases/download/v2.0.0/quiet-server.gif" alt="Quiet Server demo: the count in the status line, then the pane that launches this branch's servers and lists what runs elsewhere" width="100%">
 </p>
 
 # Quiet Server

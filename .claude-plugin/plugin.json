@@ -1,6 +1,6 @@
 {
   "name": "quiet-server",
-  "version": "0.1.0",
+  "version": "2.0.0",
   "description": "Launch your servers without leaving the conversation and catch the ones still running elsewhere: a count in the status line, and /quiet-server opens a pane to launch, open or stop them, with every other server on the machine grouped by project.",
   "author": {
     "name": "Arthur Glaizal",
