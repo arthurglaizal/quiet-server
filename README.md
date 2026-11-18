@@ -110,11 +110,11 @@ Run the checks with `claude plugin validate .` and `claude plugin test .`.
 
 The Quiet mods share one design: grey by default, color only when something needs you.
 
-| Mod | Description |
-| --- | --- |
-| [Quiet&nbsp;Token&nbsp;Bar](https://github.com/arthurglaizal/quiet-token-bar) | Your context window in one quiet line: a patterned bar, a compact button and your session and weekly limits, grey until something gets warm. |
-| [Quiet&nbsp;Model](https://github.com/arthurglaizal/quiet-model) | Pick the model and effort in one quiet grey row. Or let Magic Router choose for each message. |
-| [Quiet&nbsp;Cost](https://github.com/arthurglaizal/quiet-cost) | What each reply cost, in one quiet grey line under it: an estimated price, the time and the tokens, and more figures you pick. |
+| | Mod | Description |
+| :-: | --- | --- |
+| <a href="https://github.com/arthurglaizal/quiet-token-bar"><img src="https://raw.githubusercontent.com/arthurglaizal/quiet-token-bar/main/.claude-plugin/icon.png" alt="" width="40"></a> | [Quiet&nbsp;Token&nbsp;Bar](https://github.com/arthurglaizal/quiet-token-bar) | Your context window in one quiet line: a patterned bar, a compact button and your session and weekly limits, grey until something gets warm. |
+| <a href="https://github.com/arthurglaizal/quiet-model"><img src="https://raw.githubusercontent.com/arthurglaizal/quiet-model/main/.claude-plugin/icon.png" alt="" width="40"></a> | [Quiet&nbsp;Model](https://github.com/arthurglaizal/quiet-model) | Pick the model and effort in one quiet grey row. Or let Magic Router choose for each message. |
+| <a href="https://github.com/arthurglaizal/quiet-cost"><img src="https://raw.githubusercontent.com/arthurglaizal/quiet-cost/main/.claude-plugin/icon.png" alt="" width="40"></a> | [Quiet&nbsp;Cost](https://github.com/arthurglaizal/quiet-cost) | What each reply cost, in one quiet grey line under it: an estimated price, the time and the tokens, and more figures you pick. |
 
 ## Support
 
