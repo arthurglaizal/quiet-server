@@ -76,6 +76,7 @@ A server launched from the pane lives as long as the Claude session: closing the
 
 - **No network requests.** Everything it reads is on your machine. Nothing leaves it except on your click: the address you copy goes to the clipboard, Open in browser hands it to your browser, and Add and Find put a request in the prompt box, which you send or not.
 - **Every 5 seconds**: `lsof` for the processes listening on TCP and their folder, `ps` for uptime, memory and CPU, and `git` for each folder's repository, worktree and branch. Every 30 seconds, `git worktree list`, `git for-each-ref` and `git symbolic-ref` for the repository's other worktrees, its branches and its default branch, and each worktree's `package.json` and `.claude/launch.json`. It reads branches, it never switches one.
+- **No credentials.** From your environment it reads only `HOME` (to list the servers under your home) and `SHELL` (to launch a script); no token, API key or other variable. The files it reads are `package.json` and `.claude/launch.json`.
 - **Only on click**: your login shell (`$SHELL -lc`) to run the script you launch, as written in `package.json` or `.claude/launch.json`, so it finds `node` and `npm` as your terminal does; `kill` to stop a server and what it started; `open` to open its address in your browser.
 - **Hooks**:
   - `command.run`, only for `/quiet-server`: opens or closes the pane and answers the command itself. It never sees or changes any other command, its own or another plugin's, and never touches a permission.

@@ -1,12 +1,11 @@
 {
   "name": "quiet-server",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Launch your servers without leaving the conversation and catch the ones still running elsewhere: a count in the status line, and /quiet-server opens a pane to launch, open or stop them, with every other server on the machine grouped by project.",
   "author": {
     "name": "Arthur Glaizal",
     "url": "https://github.com/arthurglaizal"
   },
-  "types": "./types/index.d.ts",
   "homepage": "https://github.com/arthurglaizal/quiet-server",
   "repository": "https://github.com/arthurglaizal/quiet-server",
   "license": "MIT",
